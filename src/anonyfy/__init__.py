@@ -4,10 +4,13 @@ Paquet Python de pseudonymisation réversible d'identifiants personnels françai
 (structurés et non structurés) pour l'envoi à un modèle de langage, avec
 registre de scope garantissant la réversibilité.
 
-Phase 01 - socle du paquet : seuls le squelette et la version sont livrés ici.
-La logique métier arrive à partir de la phase 04 (modèle de données).
+Phase 08 - API publique ``Vault``: masquage/démasquage des identifiants
+structurés à grand domaine (NIR, SIREN, SIRET, IBAN, TVA, CB, téléphone) par FPE
+avec registre de scope et intégration Aho-Corasick.
 """
+
+from anonyfy.vault import Vault
 
 __version__ = "0.1.0"
 
-__all__ = ["__version__"]
+__all__ = ["Vault", "__version__"]
