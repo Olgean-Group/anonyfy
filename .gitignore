@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 dist/
 build/
+# Artefacts de pilotage Olgenius et de session (locaux, non versionnés)
+.olgenius/
+resume.md
