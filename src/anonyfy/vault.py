@@ -63,11 +63,18 @@ class Vault:
         déchiffre que les substituts présents au registre (invariant 4), et
         restitue le clair par FPE ``decrypt_*``. Les substituts non reconnus au
         registre sont laissés tels quels (invariant 4: intrusion impossible).
-        """
-        ac = AhoCorasick.from_registry(self._registry)
-        hits = ac.find(text)
 
-        # Substitution de droite à gauche pour préserver les offsets.
+        Le texte est normalisé (espaces entre chiffres supprimés) avant la
+        recherche Aho-Corasick pour retrouver les substituts reformatés par le
+        modèle (ex. SIRET groupé par 3, IBAN espacé). Les positions des hits sont
+        remappées vers le texte original avant substitution.
+        """
+        normalized, offset_map = _normalize_inter_digit_spaces(text)
+
+        ac = AhoCorasick.from_registry(self._registry)
+        hits = ac.find(normalized)
+
+        # Mapper les hits vers les positions du texte original et déchiffrer.
         replacements: list[tuple[int, int, str]] = []
         for hit in hits:
             if not self._registry.contains(hit.substitute):
@@ -80,9 +87,11 @@ class Vault:
                 continue
             decrypt_fn = _TYPES[etype].decrypt
             clear = decrypt_fn(hit.substitute, key=self._key, scope=self._scope)
-            replacements.append((hit.start, hit.end, clear))
+            orig_start = offset_map[hit.start]
+            orig_end = offset_map[hit.end - 1] + 1
+            replacements.append((orig_start, orig_end, clear))
 
-        # Trier par position décroissante (droite à gauche) pour préserver offsets.
+        # Substitution de droite à gauche pour préserver les offsets.
         replacements.sort(key=lambda x: x[0], reverse=True)
         result = text
         for start, end, clear in replacements:
@@ -98,3 +107,31 @@ class Vault:
 
     def __exit__(self, *args: object) -> None:
         self.close()
+
+
+def _normalize_inter_digit_spaces(text: str) -> tuple[str, list[int]]:
+    """Supprime les espaces entre chiffres et renvoie (normalisé, mapping).
+
+    Le modèle peut reformater les substituts en groupant les chiffres par 3
+    (ex. ``73282932000033`` -> ``732 829 320 000 33``). Cette normalisation
+    supprime les espaces entourés de chiffres pour permettre à l'automate
+    Aho-Corasick de retrouver le substitut compact.
+
+    ``offset_map[i]`` donne la position dans le texte original du caractère
+    ``normalisé[i]``, pour remapper les positions des hits vers le texte original.
+    """
+    normalized: list[str] = []
+    offset_map: list[int] = []
+    for i, ch in enumerate(text):
+        if (
+            ch == " "
+            and normalized
+            and normalized[-1].isdigit()
+            and i + 1 < len(text)
+            and text[i + 1].isdigit()
+        ):
+            # Espace entre deux chiffres: supprimer (reformatage du modèle).
+            continue
+        normalized.append(ch)
+        offset_map.append(i)
+    return "".join(normalized), offset_map
