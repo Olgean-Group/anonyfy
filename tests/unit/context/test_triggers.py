@@ -118,6 +118,26 @@ class TestConfiguration:
         assert jean[0].confidence <= _FAIBLE
 
 
+class TestNomsCommunsArbitrage:
+    """D25: un nom commun (dans prenoms ET noms) doit produire les deux spans
+    PRENOM et PATRONYME pour que l'arbitrage phase 13 puisse décider (priority
+    PATRONYME>PRENOM). Le ``elif`` original ne produisait que PRENOM, court-circuitant
+    l'arbitrage."""
+
+    def test_nom_commun_avec_trigger_produit_deux_spans(self):
+        # ABRAHAM est dans load_noms() ET load_prenoms().
+        spans = apply("M. ABRAHAM")
+        types = {(s.type, s.value) for s in spans}
+        assert (EntityType.PRENOM, "ABRAHAM") in types
+        assert (EntityType.PATRONYME, "ABRAHAM") in types
+
+    def test_nom_commun_sans_trigger_produit_deux_spans(self):
+        spans = apply("ABRAHAM")
+        types = {(s.type, s.value) for s in spans}
+        assert (EntityType.PRENOM, "ABRAHAM") in types
+        assert (EntityType.PATRONYME, "ABRAHAM") in types
+
+
 class TestEdge:
     def test_texte_vide(self):
         assert apply("") == []
