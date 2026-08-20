@@ -47,10 +47,23 @@ def test_adr_0001_retrait_nist_mentionne() -> None:
 
 
 def test_adr_0001_fpe_par_type_registre() -> None:
-    """D2: plaque SIV et référence de dossier basculent sur le mécanisme registre (pas FPE pur)."""
+    """CA-6 (PLAN phase 03): ≥2 lignes mentionnent « plaque SIV » ou « référence de dossier».
+
+    Le critère CA-6 exige ``grep -E "plaque SIV|référence de dossier"`` retourne
+    ≥2 lignes (sensible à la casse). Le tableau §4.2 doit donc écrire les types en
+    minuscules initiales. On vérifie aussi que chaque sous-chaîne apparaît au
+    moins une fois et que le mécanisme registre est mentionné.
+    """
     text = ADR.read_text(encoding="utf-8")
-    assert "plaque SIV" in text
-    assert "référence de dossier" in text
+    matching_lines = [
+        line for line in text.splitlines() if "plaque SIV" in line or "référence de dossier" in line
+    ]
+    assert len(matching_lines) >= 2, (
+        f"CA-6: attendu ≥2 lignes mentionnant 'plaque SIV' ou 'référence de dossier', "
+        f"trouvé {len(matching_lines)}"
+    )
+    assert any("plaque SIV" in line for line in matching_lines)
+    assert any("référence de dossier" in line for line in matching_lines)
     assert "registre" in text
 
 
