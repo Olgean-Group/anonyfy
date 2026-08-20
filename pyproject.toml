@@ -20,6 +20,9 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Security :: Cryptography",
 ]
+dependencies = [
+    "ff3>=1.0.3",
+]
 
 [project.urls]
 Homepage = "https://github.com/anonyfy/anonyfy"
