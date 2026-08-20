@@ -50,7 +50,9 @@ class Vault:
         self._scope = scope
         self._registry = ScopeRegistry(key=key, scope=scope, registry_path=registry_path)
         self._engine = Engine(
-            key=key, scope=scope, registry=self._registry,
+            key=key,
+            scope=scope,
+            registry=self._registry,
             reference_patterns=reference_patterns,
         )
 

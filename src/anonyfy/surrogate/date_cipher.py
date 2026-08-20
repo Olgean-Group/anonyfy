@@ -31,8 +31,18 @@ _N_YEARS = _END_YEAR - _EPOCH_YEAR + 1  # 201
 _DOMAIN = _N_YEARS * _MONTHS_PER_YEAR * _DAYS_CLAMP  # 67536
 
 _MONTHS_FR = {
-    1: "janvier", 2: "fevrier", 3: "mars", 4: "avril", 5: "mai", 6: "juin",
-    7: "juillet", 8: "aout", 9: "septembre", 10: "octobre", 11: "novembre", 12: "decembre",
+    1: "janvier",
+    2: "fevrier",
+    3: "mars",
+    4: "avril",
+    5: "mai",
+    6: "juin",
+    7: "juillet",
+    8: "aout",
+    9: "septembre",
+    10: "octobre",
+    11: "novembre",
+    12: "decembre",
 }
 _MONTHS_FR_LOOKUP = {v: k for k, v in _MONTHS_FR.items()}
 

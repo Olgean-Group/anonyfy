@@ -230,14 +230,9 @@ class ScopeRegistry:
     def _migrate(self, from_version: int) -> None:
         # v1 -> v2: ajout colonne case_pattern (D24, flag casse types gazetteer).
         if from_version < 2:
-            cols = {
-                row[1]
-                for row in self._conn.execute("PRAGMA table_info(entries)")
-            }
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(entries)")}
             if "case_pattern" not in cols:
-                self._conn.execute(
-                    "ALTER TABLE entries ADD COLUMN case_pattern TEXT"
-                )
+                self._conn.execute("ALTER TABLE entries ADD COLUMN case_pattern TEXT")
 
     def schema_version(self) -> int:
         row = self._conn.execute("SELECT schema_version FROM meta").fetchone()

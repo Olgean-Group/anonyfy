@@ -100,9 +100,7 @@ class Engine:
         self._scope = scope
         self._registry = registry
         self._reference_validator = (
-            reference.ReferenceValidator(reference_patterns)
-            if reference_patterns
-            else None
+            reference.ReferenceValidator(reference_patterns) if reference_patterns else None
         )
         # Ciphers non-FPE (construits une fois; gazetteers cached).
         self._cipher_patronyme = GazetteerCipher(key, scope, "patronyme", load_noms())
@@ -140,11 +138,11 @@ class Engine:
                     f"non masqué (substitut == clair)",
                     stacklevel=2,
                 )
-            case_pattern = (
-                classify_case(span.value) if span.type in _GAZETTEER_TYPES else None
-            )
+            case_pattern = classify_case(span.value) if span.type in _GAZETTEER_TYPES else None
             self._registry.register_fpe(
-                span.type.value, span.value, surrogate=substitute,
+                span.type.value,
+                span.value,
+                surrogate=substitute,
                 case_pattern=case_pattern,
             )
             substitutions.append((span.start, span.end, substitute, span.type))
