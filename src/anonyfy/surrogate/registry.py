@@ -63,7 +63,7 @@ __all__ = [
 
 # Version courante du schéma. Incrémenter en cas de changement de structure;
 # l'ouverture migre les versions antérieures et refuse les versions futures.
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 # Taille de batch: nombre de réservations par transaction commitée. Un batch
 # est atomique (tout ou rien); un crash perd au plus le batch en cours (les
@@ -103,6 +103,7 @@ class SurrogateRecord:
     entity_type: str
     clear_index: int
     clear_hmac: str
+    case_pattern: str | None = None
 
 
 class ScopeRegistry:
@@ -190,7 +191,8 @@ class ScopeRegistry:
             "  surrogate TEXT NOT NULL,"
             "  entity_type TEXT NOT NULL,"
             "  clear_index INTEGER NOT NULL,"
-            "  clear_hmac TEXT NOT NULL"
+            "  clear_hmac TEXT NOT NULL,"
+            "  case_pattern TEXT"
             ")"
         )
         row = con.execute("SELECT COUNT(*) FROM meta").fetchone()
@@ -225,10 +227,12 @@ class ScopeRegistry:
                 (CURRENT_SCHEMA_VERSION,),
             )
 
-    def _migrate(self, _from_version: int) -> None:
-        # Aucune migration de structure nécessaire entre v0 et v1 (même schéma).
-        # Point d'extension pour les versions futures.
-        return None
+    def _migrate(self, from_version: int) -> None:
+        # v1 -> v2: ajout colonne case_pattern (D24, flag casse types gazetteer).
+        if from_version < 2:
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(entries)")}
+            if "case_pattern" not in cols:
+                self._conn.execute("ALTER TABLE entries ADD COLUMN case_pattern TEXT")
 
     def schema_version(self) -> int:
         row = self._conn.execute("SELECT schema_version FROM meta").fetchone()
@@ -314,6 +318,7 @@ class ScopeRegistry:
         clear_value: str,
         *,
         surrogate: str,
+        case_pattern: str | None = None,
     ) -> str:
         """Enregistre un substitut FPE pré-calculé (grands domaines, phase 07/08).
 
@@ -322,6 +327,11 @@ class ScopeRegistry:
         Permet à ``unmask`` (phase 08) de vérifier l'appartenance du substitut au
         scope (invariant 4: ``contains`` / ``lookup``) et à l'automate Aho-Corasick
         (phase 10b) de retrouver le substitut via ``iter_surrogates``.
+
+        ``case_pattern`` (D24): pattern casse par mot pour les types gazetteer
+        (patronyme/prénom/commune/voie), permettant au unmask de restituer la casse
+        originale depuis la forme majuscule du gazetteer. ``None`` pour les types
+        sans casse (FPE). Ne contient pas le clair (invariant 1).
 
         Idempotent: un même (entity_type, clear_value) renvoie le substitut déjà
         enregistré. Lève ``RegistryError`` si le substitut est déjà attribué à un
@@ -345,7 +355,7 @@ class ScopeRegistry:
                 raise RegistryError(
                     f"substitut FPE en collision avec un clair distinct: {surrogate!r}"
                 )
-            self._insert(entity_type, surrogate, 0, clear_hmac)
+            self._insert(entity_type, surrogate, 0, clear_hmac, case_pattern)
             self._hmac_to_surrogate[(entity_type, clear_hmac)] = surrogate
             self._used_surrogates.add(surrogate)
             return surrogate
@@ -356,6 +366,7 @@ class ScopeRegistry:
         surrogate: str,
         clear_index: int,
         clear_hmac: str,
+        case_pattern: str | None = None,
     ) -> None:
         """Insère une entrée via le batch transactionnel courant.
 
@@ -368,9 +379,9 @@ class ScopeRegistry:
             self._conn.execute("BEGIN")
             self._txn_open = True
         self._conn.execute(
-            "INSERT INTO entries(surrogate, entity_type, clear_index, clear_hmac) "
-            "VALUES (?, ?, ?, ?)",
-            (surrogate, entity_type, clear_index, clear_hmac),
+            "INSERT INTO entries(surrogate, entity_type, clear_index, clear_hmac, case_pattern) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (surrogate, entity_type, clear_index, clear_hmac, case_pattern),
         )
         self._pending += 1
         if self._pending >= _BATCH_SIZE:
@@ -439,9 +450,10 @@ class ScopeRegistry:
     def lookup(self, surrogate: str) -> SurrogateRecord | None:
         """Renvoie l'enregistrement d'un substitut émis, ou ``None`` s'il est inconnu.
 
-        L'enregistrement expose ``surrogate``, ``entity_type``, ``clear_index``
-        et ``clear_hmac`` (index/HMAC, **pas le clair**, invariant 1). Le unmask
-        clair est de la responsabilité de la phase 08.
+        L'enregistrement expose ``surrogate``, ``entity_type``, ``clear_index``,
+        ``clear_hmac`` (index/HMAC, **pas le clair**, invariant 1) et
+        ``case_pattern`` (D24, pattern casse pour types gazetteer, ``None`` pour
+        FPE). Le unmask clair est de la responsabilité de la phase 08.
         """
         if not isinstance(surrogate, str):
             raise ValueError(f"surrogate attendu en str, reçu {type(surrogate).__name__}")
@@ -449,8 +461,8 @@ class ScopeRegistry:
             if surrogate not in self._used_surrogates:
                 return None
             row = self._conn.execute(
-                "SELECT surrogate, entity_type, clear_index, clear_hmac FROM entries "
-                "WHERE surrogate=?",
+                "SELECT surrogate, entity_type, clear_index, clear_hmac, case_pattern "
+                "FROM entries WHERE surrogate=?",
                 (surrogate,),
             ).fetchone()
         if row is None:
@@ -460,6 +472,7 @@ class ScopeRegistry:
             entity_type=row[1],
             clear_index=row[2],
             clear_hmac=row[3],
+            case_pattern=row[4] if len(row) > 4 else None,
         )
 
     def iter_surrogates(self) -> Iterator[str]:

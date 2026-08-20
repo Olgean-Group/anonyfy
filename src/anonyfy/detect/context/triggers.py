@@ -149,7 +149,7 @@ def apply(
                     confidence=_BOOSTED if near else _BASE,
                 )
             )
-        elif key in noms:
+        if key in noms:
             spans.append(
                 Span(
                     start=tok_start,
@@ -160,7 +160,7 @@ def apply(
                     confidence=_BOOSTED if near else _BASE,
                 )
             )
-        elif near:
+        if key not in prenoms and key not in noms and near:
             # Nom absent des listes, capté par un déclencheur contextuel.
             spans.append(
                 Span(

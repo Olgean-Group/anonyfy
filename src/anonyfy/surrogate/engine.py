@@ -1,28 +1,44 @@
-"""Moteur d'orchestration des substituts structurés (phase 08).
+"""Moteur d'orchestration des substituts (phase 08 + 13).
 
-Orchestre la détection (validateurs phase 05/06), le chiffrement FPE (phase 07),
-l'enregistrement dans le registre (phase 10 ``register_fpe``) et l'arbitrage des
-chevauchements (phase 08 ``resolve_overlaps``).
+Orchestre la détection (validateurs phase 05/06 + contextuels phase 12/13),
+l'arbitrage des chevauchements (phase 08/13 ``resolve_overlaps``), le chiffrement
+FPE (phase 07) et non-FPE (phase 13 permutation/keystream), l'enregistrement
+dans le registre (phase 10 ``register_fpe``) et la substitution droite-à-gauche.
 
-Le moteur est responsable du masquage (mask) d'un texte: il détecte les
-identifiants structurés, arbitre les chevauchements, chiffre par FPE, enregistre
-chaque substitut FPE émis dans le registre (invariant 4), et substitue de droite
-à gauche pour préserver les offsets (architecture §4).
+Types couverts:
+- FPE (D2 grands domaines): SIRET, SIREN, NIR, IBAN, TVA, CB, téléphone.
+- Gazetteer (D22 permutation index): patronyme, prénom, commune, voie.
+- Plaque SIV (D2/D22 permutation [0,1000)).
+- Référence dossier (D2/D22 XOR keystream).
+- Email local-part (D9/D22 permutation base38 + repli keystream).
+- Date (D8/D22 permutation bucket, jour clampé [1,28]).
 
-Le démasquage (unmask) est porté par ``Vault`` qui s'appuie sur l'automate
-Aho-Corasick (phase 10b) pour retrouver les substituts et sur le registre pour
-l'appartenance (invariant 4).
-
-Référence: PLAN.md phase 08, architecture §4, invariants 1/3/4.
+Le démasquage est porté par ``Vault`` (Aho-Corasick + registre + decrypt).
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
-from anonyfy.detect.validators import cb, iban, nir, phone, siren, tva
+from anonyfy.detect.context import dates_text, places, triggers
+from anonyfy.detect.context import email as email_ctx
+from anonyfy.detect.gazetteers.loader import (
+    load_communes,
+    load_noms,
+    load_prenoms,
+    load_voies,
+)
+from anonyfy.detect.validators import cb, iban, nir, phone, plate, reference, siren, tva
+from anonyfy.detect.validators import date as date_val
 from anonyfy.resolve.arbitrage import resolve_overlaps
 from anonyfy.surrogate import fpe
+from anonyfy.surrogate.case_pattern import classify_case
+from anonyfy.surrogate.date_cipher import DateCipher
+from anonyfy.surrogate.email_cipher import EmailCipher
+from anonyfy.surrogate.gazetteer_cipher import GazetteerCipher
+from anonyfy.surrogate.plate_cipher import PlateCipher
+from anonyfy.surrogate.reference_cipher import ReferenceCipher
 from anonyfy.surrogate.registry import ScopeRegistry
 from anonyfy.types import EntityType, MaskedText, Span
 
@@ -39,8 +55,6 @@ class TypeInfo:
     decrypt: object  # Callable[[str, bytes, str], str]
 
 
-# Table de dispatch des types structurés FPE couverts en phase 08 (D2).
-# Chaque type: son validateur (detect), son encrypt FPE et son decrypt FPE.
 _TYPES: dict[EntityType, TypeInfo] = {
     EntityType.SIRET: TypeInfo(
         EntityType.SIRET, siren.detect_siret, fpe.encrypt_siret, fpe.decrypt_siret
@@ -59,40 +73,80 @@ _TYPES: dict[EntityType, TypeInfo] = {
     ),
 }
 
+# Types gazetteer nécessitant un flag casse (D24): permutation restitue la forme
+# majuscule du gazetteer; le pattern casse permet de restituer la casse originale.
+_GAZETTEER_TYPES = frozenset(
+    {EntityType.PATRONYME, EntityType.PRENOM, EntityType.COMMUNE, EntityType.VOIE}
+)
+
 
 class Engine:
-    """Moteur de masquage des identifiants structurés (phase 08).
+    """Moteur de masquage (phase 08 + 13).
 
-    Détecte les identifiants structurés (D2), arbitre les chevauchements,
-    chiffre par FPE (07), enregistre chaque substitut dans le registre (10),
-    et substitue de droite à gauche pour préserver les offsets.
+    Détecte tous les types (FPE + non-FPE), arbitre les chevauchements, chiffre
+    par FPE ou permutation/keystream, enregistre chaque substitut au registre
+    (invariant 4), et substitue de droite à gauche pour préserver les offsets.
     """
 
-    def __init__(self, *, key: bytes, scope: str, registry: ScopeRegistry) -> None:
+    def __init__(
+        self,
+        *,
+        key: bytes,
+        scope: str,
+        registry: ScopeRegistry,
+        reference_patterns: list[str] | None = None,
+    ) -> None:
         self._key = key
         self._scope = scope
         self._registry = registry
+        self._reference_validator = (
+            reference.ReferenceValidator(reference_patterns) if reference_patterns else None
+        )
+        # Ciphers non-FPE (construits une fois; gazetteers cached).
+        self._cipher_patronyme = GazetteerCipher(key, scope, "patronyme", load_noms())
+        self._cipher_prenom = GazetteerCipher(key, scope, "prenom", load_prenoms())
+        self._cipher_commune = GazetteerCipher(key, scope, "commune", load_communes())
+        self._cipher_voie = GazetteerCipher(key, scope, "voie", load_voies())
+        self._cipher_plate = PlateCipher(key, scope)
+        self._cipher_reference = ReferenceCipher(key, scope)
+        self._cipher_email = EmailCipher(key, scope)
+        self._cipher_date = DateCipher(key, scope)
 
     def mask(self, text: str) -> MaskedText:
-        """Masque les identifiants structurés de ``text``.
+        """Masque tous les identifiants détectés dans ``text``.
 
-        Détecte → arbitre → FPE → registre → substitution droite-à-gauche.
-        Renvoie un ``MaskedText`` dont ``.text`` contient les substituts (jamais le
-        clair, invariant 1) et ``.entities`` pointe vers les substituts réels.
+        Détecte → arbitre → chiffre → registre → substitution droite-à-gauche.
+        Renvoie un ``MaskedText`` dont ``.text`` contient les substituts (jamais
+        le clair, invariant 1) et ``.entities`` pointe vers les substituts réels.
+        Les valeurs non masquables (nom inconnu du gazetteer, format invalide)
+        sont laissées en clair (choix D22(ii), fuite résiduelle documentée).
         """
         spans = self._detect_all(text)
         resolved = resolve_overlaps(spans)
 
-        # Chiffrer et enregistrer chaque span résolu.
         substitutions: list[tuple[int, int, str, EntityType]] = []
         for span in resolved:
-            info = _TYPES[span.type]
-            encrypt_fn = info.encrypt  # type: ignore[operator]
-            substitute = encrypt_fn(span.value, key=self._key, scope=self._scope)  # type: ignore[call-arg]
-            self._registry.register_fpe(span.type.value, span.value, surrogate=substitute)
+            substitute = self._encrypt_span(span)
+            if substitute is None:
+                continue
+            # D23 garde-fou: un point fixe (substitut == clair) est une fuite
+            # résiduelle rare (Feistel != derangement). Alerte non silencieuse;
+            # le masquage continue avec le point fixe (pas d'exception).
+            if substitute == span.value:
+                warnings.warn(
+                    f"Point fixe permutation: {span.type.value} '{span.value}' "
+                    f"non masqué (substitut == clair)",
+                    stacklevel=2,
+                )
+            case_pattern = classify_case(span.value) if span.type in _GAZETTEER_TYPES else None
+            self._registry.register_fpe(
+                span.type.value,
+                span.value,
+                surrogate=substitute,
+                case_pattern=case_pattern,
+            )
             substitutions.append((span.start, span.end, substitute, span.type))
 
-        # Substitution de droite à gauche pour préserver les offsets.
         masked = text
         entities: list[Span] = []
         for start, end, substitute, etype in sorted(
@@ -105,18 +159,90 @@ class Engine:
                     end=start + len(substitute),
                     type=etype,
                     value=substitute,
-                    rule_id=f"fpe-{etype.value.lower()}",
+                    rule_id=f"mask-{etype.value.lower()}",
                     confidence=1.0,
                 )
             )
 
-        # Trier les entities par position (ordre gauche-à-droite pour le consommateur).
         entities.sort(key=lambda s: s.start)
         return MaskedText(text=masked, entities=tuple(entities))
 
+    def _encrypt_span(self, span: Span) -> str | None:
+        """Chiffre un span selon son type. Retourne le substitut ou None."""
+        etype = span.type
+        if etype in _TYPES:
+            encrypt_fn = _TYPES[etype].encrypt
+            return encrypt_fn(span.value, key=self._key, scope=self._scope)
+        if etype == EntityType.PATRONYME:
+            return self._cipher_patronyme.encrypt(span.value)
+        if etype == EntityType.PRENOM:
+            return self._cipher_prenom.encrypt(span.value)
+        if etype == EntityType.COMMUNE:
+            return self._cipher_commune.encrypt(span.value)
+        if etype == EntityType.VOIE:
+            return self._cipher_voie.encrypt(span.value)
+        if etype == EntityType.PLAQUE_SIV:
+            return self._cipher_plate.encrypt(span.value)
+        if etype == EntityType.REFERENCE_DOSSIER:
+            return self._cipher_reference.encrypt(span.value)
+        if etype == EntityType.EMAIL:
+            sub, _mode = self._cipher_email.encrypt(span.value)
+            return sub
+        if etype == EntityType.DATE:
+            return self._cipher_date.encrypt(span.value)
+        return None
+
+    def decrypt_surrogate(self, etype: EntityType, surrogate: str) -> str | None:
+        """Déchiffre un substitut selon son type (pour Vault.unmask)."""
+        if etype in _TYPES:
+            decrypt_fn = _TYPES[etype].decrypt
+            return decrypt_fn(surrogate, key=self._key, scope=self._scope)
+        if etype == EntityType.PATRONYME:
+            return self._cipher_patronyme.decrypt(surrogate)
+        if etype == EntityType.PRENOM:
+            return self._cipher_prenom.decrypt(surrogate)
+        if etype == EntityType.COMMUNE:
+            return self._cipher_commune.decrypt(surrogate)
+        if etype == EntityType.VOIE:
+            return self._cipher_voie.decrypt(surrogate)
+        if etype == EntityType.PLAQUE_SIV:
+            return self._cipher_plate.decrypt(surrogate)
+        if etype == EntityType.REFERENCE_DOSSIER:
+            return self._cipher_reference.decrypt(surrogate)
+        if etype == EntityType.EMAIL:
+            mode = _detect_email_mode(surrogate)
+            return self._cipher_email.decrypt(surrogate, mode)
+        if etype == EntityType.DATE:
+            return self._cipher_date.decrypt(surrogate)
+        return None
+
     def _detect_all(self, text: str) -> list[Span]:
-        """Détecte tous les identifiants structurés (tous types FPE confondus)."""
+        """Détecte tous les identifiants (FPE + non-FPE)."""
         spans: list[Span] = []
         for info in _TYPES.values():
-            spans.extend(info.detect(text))  # type: ignore[operator]
+            spans.extend(info.detect(text))
+        spans.extend(triggers.apply(text))
+        spans.extend(places.detect(text))
+        spans.extend(date_val.detect(text))
+        spans.extend(dates_text.detect(text))
+        spans.extend(email_ctx.detect(text))
+        spans.extend(plate.detect(text))
+        if self._reference_validator is not None:
+            spans.extend(self._reference_validator.detect(text))
         return spans
+
+
+_HEX_CHARS = set("0123456789abcdef")
+
+
+def _detect_email_mode(substitute: str) -> str:
+    """Détecte le mode email (perm vs keystream) heuristiquement.
+
+    Le local-part keystream est hex pur (sub_bytes.hex()). Le local-part perm
+    contient généralement des lettres non-hex (g, h, i..., +, ., '). Heuristique:
+    si le local-part est hex pur et de longueur paire, keystream; sinon perm.
+    """
+    localpart = substitute.split("@", 1)[0]
+    if len(localpart) % 2 == 0 and localpart and all(c in _HEX_CHARS for c in localpart):
+        return "keystream"
+    return "perm"

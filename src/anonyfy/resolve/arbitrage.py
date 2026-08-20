@@ -26,6 +26,11 @@ __all__ = ["DEFAULT_PRIORITY", "resolve_overlaps"]
 # Priorité déclarée par type (plus élevé = gagne les égalités).
 # SIRET (14 chiffres, structure SIREN+NIC) est plus spécifique que CB (13-19
 # chiffres) pour un même nombre de 14 chiffres Luhn-valide.
+# Types gazetteer (phase 13): une voie est plus spécifique qu'une commune (elle
+# contient souvent le type de voie + le toponyme), elle-même plus spécifique
+# qu'un patronyme isolé, lui-même plus spécifique qu'un prénom (souvent court
+# et ambigu). Tranche les égalités (même confiance, même longueur) entre
+# candidats gazetteer chevauchants.
 DEFAULT_PRIORITY: dict[EntityType, int] = {
     EntityType.SIRET: 6,
     EntityType.NIR: 5,
@@ -34,14 +39,14 @@ DEFAULT_PRIORITY: dict[EntityType, int] = {
     EntityType.CARTE_BANCAIRE: 4,
     EntityType.SIREN: 3,
     EntityType.TELEPHONE: 2,
+    EntityType.VOIE: 4,
+    EntityType.COMMUNE: 3,
+    EntityType.PATRONYME: 2,
+    EntityType.PRENOM: 1,
     EntityType.PLAQUE_SIV: 1,
     EntityType.REFERENCE_DOSSIER: 1,
     EntityType.EMAIL: 1,
     EntityType.DATE: 1,
-    EntityType.PATRONYME: 1,
-    EntityType.PRENOM: 1,
-    EntityType.COMMUNE: 1,
-    EntityType.VOIE: 1,
 }
 
 
