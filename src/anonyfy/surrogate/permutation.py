@@ -33,15 +33,15 @@ class Permutation:
         self._scope = scope
         self._entity_type = entity_type
         self._n = n
-        # k = nombre de bits pour couvrir [0, n). 2^k >= n.
-        k = 1
-        while (1 << k) < n:
-            k += 1
-        self._k = k
-        # Deux moitiés sur k bits (total 2k bits, domaine 2^(2k) >= 2^k >= n).
-        self._half_bits = k
-        self._half_mask = (1 << k) - 1
-        self._block_size = (1 << k)  # taille d'une moitié = 2^k
+        # k_total = ceil(log2(n)): domaine total 2^k_total >= n.
+        k_total = 1
+        while (1 << k_total) < n:
+            k_total += 1
+        # Deux moitiés égales: half_bits = ceil(k_total/2).
+        # Domaine 2^(2*half_bits) >= 2^k_total >= n. Cycle-walking serré.
+        self._half_bits = (k_total + 1) // 2
+        self._half_mask = (1 << self._half_bits) - 1
+        self._block_size = 1 << self._half_bits  # taille d'une moitié
 
     def _round_function(self, right: int, round_index: int) -> int:
         """F(R) = int.from_bytes(HMAC-SHA256(key, scope||type||round||R), 'big') mod block_size."""
