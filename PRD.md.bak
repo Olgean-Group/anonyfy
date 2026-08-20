@@ -194,12 +194,7 @@ fournisseur de LLM, qui est un sous-traitant hors du périmètre de traitement i
    ça, et prétendre le contraire serait malhonnête.
 2. **Le dictionnaire de code.** Un mapping déterministe *est* un code book. Qui obtient
    un grand nombre de couples clair/substitut peut inverser. Mitigations : clé secrète
-   par déploiement, sel par scope. La rotation de clé est reportée à **v2** : en v1,
-   elle exigerait un registre stockant la valeur claire pour rejouer les HMAC et
-   re-chiffrer les substituts après K→K', ce qui contredirait l'invariant 1 (« le
-   clair ne franchit jamais la frontière ») et la promesse « jamais de clair
-   stocké ». La v2 introduirait un registre chiffrant la valeur claire sous KMS,
-   avec consentement explicite du client. Voir ADR 0001 (hors périmètre v1).
+   par déploiement, sel par scope, rotation de clé prévue dès la v1.
 3. **La compromission de la clé.** La clé permet de tout inverser. Elle doit vivre dans
    le gestionnaire de secrets du client, jamais dans le dépôt, jamais dans le journal.
 4. **Le FPE sur petits domaines.** FF3-1 est faible quand l'espace des valeurs possibles
