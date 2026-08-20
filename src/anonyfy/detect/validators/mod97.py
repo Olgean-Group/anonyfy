@@ -27,9 +27,7 @@ def iban_mod97(iban: str) -> int:
     if len(iban) < 5:
         raise ValueError(f"IBAN trop court: {iban!r}")
     rearranged = iban[4:] + iban[:4]
-    numeric = "".join(
-        str(ord(c) - ord("A") + 10) if c.isalpha() else c for c in rearranged
-    )
+    numeric = "".join(str(ord(c) - ord("A") + 10) if c.isalpha() else c for c in rearranged)
     return int(numeric) % 97
 
 

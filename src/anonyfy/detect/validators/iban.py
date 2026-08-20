@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import re
 
-from anonyfy.types import EntityType, Span
 from anonyfy.detect.validators.mod97 import iban_mod97
+from anonyfy.types import EntityType, Span
 
 __all__ = ["detect", "validate"]
 

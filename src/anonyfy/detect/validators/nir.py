@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import re
 
-from anonyfy.types import EntityType, Span
 from anonyfy.detect.validators.mod97 import nir_control_key
+from anonyfy.types import EntityType, Span
 
 __all__ = ["detect", "validate"]
 

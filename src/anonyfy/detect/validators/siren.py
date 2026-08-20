@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import re
 
-from anonyfy.types import EntityType, Span
 from anonyfy.detect.validators.luhn import is_valid_luhn
+from anonyfy.types import EntityType, Span
 
 __all__ = ["detect", "detect_siret", "validate", "validate_siret"]
 

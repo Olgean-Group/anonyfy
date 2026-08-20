@@ -7,8 +7,6 @@ Vérifie des identifiants dont la clé est valide ET invalide, plus cas limites
 
 from __future__ import annotations
 
-import pytest
-
 from anonyfy.detect.validators.luhn import is_valid_luhn, luhn_checksum
 
 
