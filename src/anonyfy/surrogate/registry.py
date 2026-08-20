@@ -34,9 +34,10 @@ par batch de `_BATCH_SIZE` réservations) pour amortir le coût du fsync. La
 latence sur 50 000 entrées est ainsi maintenue sous le seuil documenté (< 5 s).
 
 Le registre se teste en isolation (fixture directe), sans Vault (phase 08).
-`lookup` (substitut -> valeur claire) n'est pas livré ici: il nécessite le
-gazetteer (phase 09/11) ou une extension de schéma; `schema_version` le rend
-possible sans casser la rétro-compat.
+`lookup(sub)->SurrogateRecord|None` est livré (phase 10b): il renvoie
+l'enregistrement index/HMAC d'un substitut émis (appartenance), **pas la valeur
+claire** (invariant 1). Le unmask clair est la responsabilité de la phase 08
+(``fpe.decrypt`` pour FPE, registre+gazetteer pour petits domaines).
 
 Référence: PLAN.md phase 10, DECISIONS.md D4, architecture §5.3.
 """
@@ -306,6 +307,48 @@ class ScopeRegistry:
                 f"sondage linéaire saturé après {gazetteer_size} essais "
                 f"(gazetteer_size={gazetteer_size}); espace de substituts épuisé"
             )
+
+    def register_fpe(
+        self,
+        entity_type: str,
+        clear_value: str,
+        *,
+        surrogate: str,
+    ) -> str:
+        """Enregistre un substitut FPE pré-calculé (grands domaines, phase 07/08).
+
+        Contrairement à ``reserve`` (gazetteer: génère un substitut index), le
+        substitut FPE est pré-calculé par FPE (phase 07) et fourni explicitement.
+        Permet à ``unmask`` (phase 08) de vérifier l'appartenance du substitut au
+        scope (invariant 4: ``contains`` / ``lookup``) et à l'automate Aho-Corasick
+        (phase 10b) de retrouver le substitut via ``iter_surrogates``.
+
+        Idempotent: un même (entity_type, clear_value) renvoie le substitut déjà
+        enregistré. Lève ``RegistryError`` si le substitut est déjà attribué à un
+        autre clair (collision inter-type, ne devrait pas arriver car FPE est
+        bijectif par type et les types ont des formats distincts).
+        """
+        if not entity_type:
+            raise ValueError("entity_type ne peut pas être vide")
+        if not clear_value:
+            raise ValueError("clear_value ne peut pas être vide")
+        if not isinstance(surrogate, str) or not surrogate:
+            raise ValueError("surrogate ne peut pas être vide")
+
+        clear_hmac = self._hmac_clear(entity_type, clear_value)
+
+        with self._lock:
+            existing = self._hmac_to_surrogate.get((entity_type, clear_hmac))
+            if existing is not None:
+                return existing
+            if surrogate in self._used_surrogates:
+                raise RegistryError(
+                    f"substitut FPE en collision avec un clair distinct: {surrogate!r}"
+                )
+            self._insert(entity_type, surrogate, 0, clear_hmac)
+            self._hmac_to_surrogate[(entity_type, clear_hmac)] = surrogate
+            self._used_surrogates.add(surrogate)
+            return surrogate
 
     def _insert(
         self,
