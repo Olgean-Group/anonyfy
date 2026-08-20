@@ -1,0 +1,29 @@
+{
+  "gazetteers": {
+    "communes": {
+      "count": 34875,
+      "sha256": "857a5906f7418b9bb6be1383883c6b797ae51e004d383e76fc5eadae476e4528",
+      "source": "INSEE - Code Officiel Geographique (COG) 2026",
+      "url": "https://www.insee.fr/fr/statistiques/fichier/8740222/v_commune_2026.csv"
+    },
+    "noms": {
+      "count": 5000,
+      "sha256": "ca86cc38f5952488dd33f5f061de39e83d3f311601e5bb363becf766b19b023a",
+      "source": "Liste de patronymes extraite de la base SIRENE (INSEE), data.gouv.fr 14/10/2018",
+      "url": "https://static.data.gouv.fr/resources/liste-de-prenoms-et-patronymes/20181014-162921/patronymes.csv"
+    },
+    "prenoms": {
+      "count": 2000,
+      "sha256": "0b89e2d19476187226fb6f368c5c07fe24c816ef211a6d0d164505f23d62d5a3",
+      "source": "INSEE - Fichier des prenoms, edition Juin 2022 (donnees 1900-2021)",
+      "url": "https://www.insee.fr/fr/statistiques/fichier/2540004/nat2021_csv.zip"
+    },
+    "voies": {
+      "count": 33574,
+      "sha256": "87eb81376a8bcdaa9e864c51c42d56e74570bc8eae73781618047a0dd4a828e6",
+      "source": "Base Adresse Nationale (BAN) - export adresses par dept, snapshot 20/08/2026 (05/15/23/48/90)",
+      "url": "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv/"
+    }
+  },
+  "version": "95cc3e63346b900f1e672c627c11e0e73bfbfa56e0f3eb547187b79eb43da668"
+}
