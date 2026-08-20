@@ -48,9 +48,17 @@ import hmac
 import os
 import sqlite3
 import threading
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["RegistryError", "SchemaVersionError", "ScopeRegistry", "default_registry_path"]
+__all__ = [
+    "RegistryError",
+    "SchemaVersionError",
+    "ScopeRegistry",
+    "SurrogateRecord",
+    "default_registry_path",
+]
 
 # Version courante du schéma. Incrémenter en cas de changement de structure;
 # l'ouverture migre les versions antérieures et refuse les versions futures.
@@ -72,6 +80,28 @@ class SchemaVersionError(RegistryError):
     Refus de charger un registre écrit par une version ultérieure (D4): on
     ne risque pas de corrompre des données dont on ne comprend pas le format.
     """
+
+
+@dataclass(frozen=True, slots=True)
+class SurrogateRecord:
+    """Enregistrement d'un substitut émis (index/HMAC, **pas le clair**).
+
+    Exposé par ``ScopeRegistry.lookup`` pour que l'automate (phase 10b) et
+    l'arbitrage (phase 13) retrouvent un substitut sans jamais accéder à la
+    valeur claire (invariant 1). Le unmask clair est la responsabilité de la
+    phase 08 (``fpe.decrypt`` pour FPE, registre+gazetteer pour petits domaines).
+
+    Attributes:
+        surrogate: le substitut (surrogate) émis.
+        entity_type: le type d'entité (ex. ``"prenom"``, ``"siret"``).
+        clear_index: indice clair entier dérivé via HMAC (pas la valeur claire).
+        clear_hmac: empreinte HMAC-SHA256 du clair (idempotence/audit, pas le clair).
+    """
+
+    surrogate: str
+    entity_type: str
+    clear_index: int
+    clear_hmac: str
 
 
 class ScopeRegistry:
@@ -349,6 +379,55 @@ class ScopeRegistry:
         )
         digest = hmac.new(self._key, msg, hashlib.sha256).digest()
         return int.from_bytes(digest[:8], "big") % gazetteer_size
+
+    # --- Recherche de substituts (phase 10b, invariant 1) -------------------
+
+    def contains(self, surrogate: str) -> bool:
+        """Indique si le substitut a été émis dans ce scope (appartenance).
+
+        N'expose jamais le clair (invariant 1): répond uniquement oui/non sur le
+        substitut. Servi en mémoire O(1) via l'ensemble des substituts attribués.
+        """
+        if not isinstance(surrogate, str):
+            raise ValueError(f"surrogate attendu en str, reçu {type(surrogate).__name__}")
+        with self._lock:
+            return surrogate in self._used_surrogates
+
+    def lookup(self, surrogate: str) -> SurrogateRecord | None:
+        """Renvoie l'enregistrement d'un substitut émis, ou ``None`` s'il est inconnu.
+
+        L'enregistrement expose ``surrogate``, ``entity_type``, ``clear_index``
+        et ``clear_hmac`` (index/HMAC, **pas le clair**, invariant 1). Le unmask
+        clair est de la responsabilité de la phase 08.
+        """
+        if not isinstance(surrogate, str):
+            raise ValueError(f"surrogate attendu en str, reçu {type(surrogate).__name__}")
+        with self._lock:
+            if surrogate not in self._used_surrogates:
+                return None
+            row = self._conn.execute(
+                "SELECT surrogate, entity_type, clear_index, clear_hmac FROM entries "
+                "WHERE surrogate=?",
+                (surrogate,),
+            ).fetchone()
+        if row is None:
+            return None
+        return SurrogateRecord(
+            surrogate=row[0],
+            entity_type=row[1],
+            clear_index=row[2],
+            clear_hmac=row[3],
+        )
+
+    def iter_surrogates(self) -> Iterator[str]:
+        """Énumère les substituts émis dans ce scope (pour ``AhoCorasick.from_registry``).
+
+        N'expose jamais le clair (invariant 1): ne renvoie que les chaînes de
+        substituts. Snapshot pris sous verrou puis itéré hors verrou.
+        """
+        with self._lock:
+            snapshot = list(self._used_surrogates)
+        yield from snapshot
 
     # --- Fermeture ----------------------------------------------------------
 
