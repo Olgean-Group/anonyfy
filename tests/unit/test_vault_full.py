@@ -34,12 +34,10 @@ class TestCritere2RoundTrip:
     def test_round_trip_texte_avec_email_plaque(self, vault):
         # D21: email régularisé (minuscule) pour round-trip exact (la régularisation
         # NFKC+minuscules est destructive; le casse-mixte est couvert par critère 9).
-        t = (
-            "Contact: jean.o'brien@exemple.fr, plaque AB-123-CD, "
-            "dossier DOS-123456"
-        )
+        t = "Contact: jean.o'brien@exemple.fr, plaque AB-123-CD, dossier DOS-123456"
         v = Vault(
-            key=_KEY, scope=_SCOPE,
+            key=_KEY,
+            scope=_SCOPE,
             registry_path=str(vault._registry.registry_path),
             reference_patterns=[r"DOS-\d{6}"],
         )

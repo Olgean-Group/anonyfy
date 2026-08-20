@@ -43,7 +43,7 @@ class TestOffsetsCoherents:
         for e in m.entities:
             assert m.text[e.start : e.end] == e.value, (
                 f"offset incohérent pour {e.type}: "
-                f"text[{e.start}:{e.end}]={m.text[e.start:e.end]!r} != value={e.value!r}"
+                f"text[{e.start}:{e.end}]={m.text[e.start : e.end]!r} != value={e.value!r}"
             )
 
     def test_mixte_nir_iban_offsets_coherents(self, tmp_path) -> None:

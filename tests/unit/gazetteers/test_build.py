@@ -4,12 +4,11 @@ Ces tests valident que scripts/build_gazetteers.py regenere les CSV gzippes
 embarques de facon deterministe (gzip mtime fixe, lignes triees) et que --check
 verifie l'identite bit a bit hors reseau.
 """
+
 from __future__ import annotations
 
-import gzip
 import hashlib
 import importlib
-import json
 import sys
 from pathlib import Path
 
