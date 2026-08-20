@@ -39,12 +39,29 @@ class TestEncryptDecrypt:
         for nom in ["Martin", "Dupont", "Bernard", "Petit", "Durand"]:
             assert c.encrypt(c.decrypt(nom)) == nom
 
-    def test_encrypt_differe_de_clair(self):
-        # Le substitut doit différer du clair (sinon fuite)
-        g = _mini_gazetteer(["Martin", "Dupont", "Bernard", "Petit", "Durand"])
+    def test_encrypt_differe_de_clair_statistique(self):
+        # D23: une permutation bijective a des points fixes (Feistel != derangement).
+        # Garde-fou: la grande majorité des substituts diffèrent (< 1% points fixes).
+        noms = [f"Nom{i:03d}" for i in range(1000)]
+        g = _mini_gazetteer(noms)
         c = GazetteerCipher(_KEY, "scope-a", "patronyme", g)
-        for nom in ["Martin", "Dupont", "Bernard", "Petit", "Durand"]:
-            assert c.encrypt(nom) != nom
+        fixes = sum(1 for n in noms if c.encrypt(n) == n)
+        assert fixes < len(noms) * 0.01  # < 1% de points fixes
+
+    def test_clairs_corpus_non_points_fixes(self):
+        # D23 garde-fou: les clairs du corpus (Jean, Dupont, Leroy, Marc) NE sont
+        # PAS points fixes avec la clé b'0'*16 des critères 2/3.
+        from anonyfy.detect.gazetteers.loader import load_noms, load_prenoms
+        key = b"0" * 16
+        gn = load_noms()
+        gp = load_prenoms()
+        cn = GazetteerCipher(key, "s", "patronyme", gn)
+        cp = GazetteerCipher(key, "s", "prenom", gp)
+        # Jean (prenom), Dupont/Leroy (patronyme), Marc (prenom) non points fixes
+        assert cp.encrypt("Jean") != "JEAN"
+        assert cn.encrypt("Dupont") != "DUPONT"
+        assert cn.encrypt("Leroy") != "LEROY"
+        assert cp.encrypt("Marc") != "MARC"
 
 
 class TestNomInconnu:

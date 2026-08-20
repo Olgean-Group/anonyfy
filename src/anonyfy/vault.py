@@ -19,7 +19,8 @@ Référence: PLAN.md phase 08, invariants 1/2/3/4, architecture §4/§6.
 from __future__ import annotations
 
 from anonyfy.resolve.aho_corasick import AhoCorasick
-from anonyfy.surrogate.engine import _TYPES, Engine
+from anonyfy.surrogate.case_pattern import apply_case
+from anonyfy.surrogate.engine import Engine
 from anonyfy.surrogate.registry import ScopeRegistry
 from anonyfy.types import EntityType, MaskedText
 
@@ -33,6 +34,8 @@ class Vault:
         key: clé FPE (16, 24 ou 32 bytes).
         scope: identifiant de scope (déterminisme scopé, invariant 2).
         registry_path: chemin du registre SQLite persistant.
+        reference_patterns: patterns regex optionnels pour la référence de dossier
+            (D2); ex. ``[r"DOS-\\d{6}"]``.
     """
 
     def __init__(
@@ -41,11 +44,15 @@ class Vault:
         key: bytes,
         scope: str,
         registry_path: str,
+        reference_patterns: list[str] | None = None,
     ) -> None:
         self._key = key
         self._scope = scope
         self._registry = ScopeRegistry(key=key, scope=scope, registry_path=registry_path)
-        self._engine = Engine(key=key, scope=scope, registry=self._registry)
+        self._engine = Engine(
+            key=key, scope=scope, registry=self._registry,
+            reference_patterns=reference_patterns,
+        )
 
     def mask(self, text: str) -> MaskedText:
         """Masque les identifiants structurés de ``text``.
@@ -83,10 +90,12 @@ class Vault:
             if record is None:
                 continue
             etype = EntityType.coerce(record.entity_type)
-            if etype not in _TYPES:
+            clear = self._engine.decrypt_surrogate(etype, hit.substitute)
+            if clear is None:
                 continue
-            decrypt_fn = _TYPES[etype].decrypt
-            clear = decrypt_fn(hit.substitute, key=self._key, scope=self._scope)
+            # D24: restituer la casse originale pour les types gazetteer.
+            if record.case_pattern is not None:
+                clear = apply_case(clear, record.case_pattern)
             orig_start = offset_map[hit.start]
             orig_end = offset_map[hit.end - 1] + 1
             replacements.append((orig_start, orig_end, clear))
