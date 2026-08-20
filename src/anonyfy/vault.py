@@ -18,6 +18,7 @@ Référence: PLAN.md phase 08, invariants 1/2/3/4, architecture §4/§6.
 
 from __future__ import annotations
 
+from anonyfy.audit import AuditLog
 from anonyfy.resolve.aho_corasick import AhoCorasick
 from anonyfy.surrogate.case_pattern import apply_case
 from anonyfy.surrogate.engine import Engine
@@ -45,6 +46,7 @@ class Vault:
         scope: str,
         registry_path: str,
         reference_patterns: list[str] | None = None,
+        audit: AuditLog | None = None,
     ) -> None:
         self._key = key
         self._scope = scope
@@ -55,14 +57,28 @@ class Vault:
             registry=self._registry,
             reference_patterns=reference_patterns,
         )
+        self._audit = audit
 
     def mask(self, text: str) -> MaskedText:
         """Masque les identifiants structurés de ``text``.
 
         Renvoie un ``MaskedText``: ``.text`` contient les substituts FPE (jamais
         le clair, invariant 1), ``.entities`` pointe vers les substituts réels.
+
+        Si un ``AuditLog`` a été fourni au constructeur, enregistre une ligne
+        d'audit (méta uniquement: scope, compte par type, rule_ids, empreinte
+        HMAC-SHA-256(key, text)). Ni le clair ni les substituts ne sont écrits
+        (D10, invariant 1).
         """
-        return self._engine.mask(text)
+        result = self._engine.mask(text)
+        if self._audit is not None:
+            self._audit.record(
+                key=self._key,
+                text=text,
+                scope=self._scope,
+                entities=result.entities,
+            )
+        return result
 
     def unmask(self, text: str) -> str:
         """Restitue le texte clair à partir du texte masqué.

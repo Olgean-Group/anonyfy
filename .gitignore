@@ -8,3 +8,4 @@ build/
 # Artefacts de pilotage Olgenius et de session (locaux, non versionnés)
 .olgenius/
 resume.md
+src/anonyfy/vault.py.bak
