@@ -182,3 +182,72 @@ def test_prd_invariant_clair_preserve() -> None:
     text = PRD.read_text(encoding="utf-8")
     assert "clair" in text.lower()
     assert "jamais" in text.lower() or "ne stocke jamais" in text.lower()
+
+
+# --- ADR 0002 (pas de service hébergé) et docs/JURIDIQUE.md (phase 03, partie 2) ---
+
+ADR2 = REPO / "docs" / "ADR" / "0002-pas-de-service-heberge.md"
+JURIDIQUE = REPO / "docs" / "JURIDIQUE.md"
+
+
+def test_adr_0002_exists() -> None:
+    """ADR 0002 formalise la décision « pas de service hébergé »."""
+    assert ADR2.is_file(), f"ADR 0002 manquante: {ADR2}"
+
+
+def test_adr_0002_pas_de_service_heberge() -> None:
+    """L'ADR 0002 énonce la décision: anonyfy ne sera jamais un service hébergé."""
+    text = ADR2.read_text(encoding="utf-8")
+    assert "service hébergé" in text.lower()
+    assert "jamais" in text.lower()
+
+
+def test_adr_0002_bibliotheque_livree() -> None:
+    """L'ADR 0002 précise que le code est livré comme bibliothèque (pas un service)."""
+    text = ADR2.read_text(encoding="utf-8").lower()
+    assert "bibliothèque" in text or "bibliotheque" in text
+
+
+def test_adr_0002_clair_ne_quitte_pas_client() -> None:
+    """L'ADR 0002 rappelle l'invariant 1: le clair ne quitte jamais l'infra client."""
+    text = ADR2.read_text(encoding="utf-8").lower()
+    assert "clair" in text
+    assert "client" in text
+
+
+def test_adr_0002_pas_de_telemetrie() -> None:
+    """L'ADR 0002 exclut la télémétrie (aucun appel réseau, fonctionne hors ligne)."""
+    text = ADR2.read_text(encoding="utf-8").lower()
+    assert "télémétrie" in text or "telemetrie" in text or "télémetrie" in text
+
+
+def test_juridique_exists() -> None:
+    """docs/JURIDIQUE.md est le cadrage juridique honnête (PRD §9)."""
+    assert JURIDIQUE.is_file(), f"JURIDIQUE.md manquant: {JURIDIQUE}"
+
+
+def test_juridique_mentionne_edps() -> None:
+    """Critère PLAN phase 03: grep -i 'EDPS' doit trouver le document (EDPS c. CRU)."""
+    text = JURIDIQUE.read_text(encoding="utf-8")
+    assert "EDPS" in text
+
+
+def test_juridique_distingue_pseudonymisation_anonymisation() -> None:
+    """Le cadrage rappelle que pseudonymisation n'est pas anonymisation au sens RGPD."""
+    text = JURIDIQUE.read_text(encoding="utf-8").lower()
+    assert "pseudonymisation" in text
+    assert "anonymisation" in text
+    assert "rgpd" in text
+
+
+def test_juridique_risque_reidentification_contexte() -> None:
+    """Le cadrage mentionne le risque résiduel de ré-identification par contexte."""
+    text = JURIDIQUE.read_text(encoding="utf-8").lower()
+    assert "ré-identification" in text or "reidentification" in text
+    assert "contexte" in text
+
+
+def test_juridique_renvoi_dpo_client() -> None:
+    """Le cadrage renvoie à la responsabilité du DPO client (instruction au cas par cas)."""
+    text = JURIDIQUE.read_text(encoding="utf-8").lower()
+    assert "dpo" in text or "responsable" in text
