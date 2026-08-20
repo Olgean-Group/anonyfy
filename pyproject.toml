@@ -29,6 +29,7 @@ Repository = "https://github.com/anonyfy/anonyfy"
 dev = [
     "pytest>=8",
     "ruff>=0.6",
+    "pyyaml>=6",
 ]
 
 [build-system]
@@ -49,6 +50,9 @@ include = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Les fichiers Markdown contiennent des blocs de code Python illustratifs dont
+# l'alignement des commentaires est intentionnel; on les exclut du formateur.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
