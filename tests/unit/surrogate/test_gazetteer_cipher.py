@@ -4,8 +4,6 @@ Patronyme/prenom/commune/voie: permutation sur l'index canonique du gazetteer.
 Nom inconnu -> non masqué (None). Round-trip sur noms connus.
 """
 
-import pytest
-
 from anonyfy.detect.gazetteers.loader import Gazetteer, GazetteerEntry
 from anonyfy.surrogate.gazetteer_cipher import GazetteerCipher
 
@@ -52,6 +50,7 @@ class TestEncryptDecrypt:
         # D23 garde-fou: les clairs du corpus (Jean, Dupont, Leroy, Marc) NE sont
         # PAS points fixes avec la clé b'0'*16 des critères 2/3.
         from anonyfy.detect.gazetteers.loader import load_noms, load_prenoms
+
         key = b"0" * 16
         gn = load_noms()
         gp = load_prenoms()

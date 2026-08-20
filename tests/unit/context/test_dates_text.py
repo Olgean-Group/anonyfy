@@ -29,8 +29,18 @@ class TestDetectDatesText:
 
     def test_tous_les_mois(self) -> None:
         mois = [
-            "janvier", "février", "mars", "avril", "mai", "juin",
-            "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+            "janvier",
+            "février",
+            "mars",
+            "avril",
+            "mai",
+            "juin",
+            "juillet",
+            "août",
+            "septembre",
+            "octobre",
+            "novembre",
+            "décembre",
         ]
         for m in mois:
             spans = detect(f"le 1 {m} 2000")

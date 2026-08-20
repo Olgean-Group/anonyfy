@@ -3,6 +3,7 @@
 Valide: chargement paresseux, index inversé (membership), attributs (genre pour
 prenoms, departement pour communes), gazetteer_version() et GazetteerVersionMismatch.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -17,7 +18,6 @@ from anonyfy.detect.gazetteers.loader import (
     load_prenoms,
     load_voies,
 )
-
 
 # --- prenoms ---
 

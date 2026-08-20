@@ -50,7 +50,8 @@ class TestCritere12ReferenceDossier:
 
     def test_round_trip_reference(self, tmp_path):
         v = Vault(
-            key=_KEY, scope="s",
+            key=_KEY,
+            scope="s",
             registry_path=str(tmp_path / "r.db"),
             reference_patterns=[r"DOS-\d{6}"],
         )
@@ -61,7 +62,8 @@ class TestCritere12ReferenceDossier:
 
     def test_reference_non_claire(self, tmp_path):
         v = Vault(
-            key=_KEY, scope="s",
+            key=_KEY,
+            scope="s",
             registry_path=str(tmp_path / "r.db"),
             reference_patterns=[r"DOS-\d{6}"],
         )
@@ -72,7 +74,8 @@ class TestCritere12ReferenceDossier:
 
     def test_round_trip_reference_long(self, tmp_path):
         v = Vault(
-            key=_KEY, scope="s",
+            key=_KEY,
+            scope="s",
             registry_path=str(tmp_path / "r.db"),
             reference_patterns=[r"REF-\d{4}-\d{3}"],
         )

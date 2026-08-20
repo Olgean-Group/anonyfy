@@ -89,8 +89,20 @@ class TestFormatPreserve:
         c = DateCipher(_KEY, "scope-a")
         sub = c.encrypt("15 mars 1990")
         # Format "JJ mois AAAA" (contient un mot de mois)
-        mois_noms = ["janvier", "fevrier", "mars", "avril", "mai", "juin",
-                     "juillet", "aout", "septembre", "octobre", "novembre", "decembre"]
+        mois_noms = [
+            "janvier",
+            "fevrier",
+            "mars",
+            "avril",
+            "mai",
+            "juin",
+            "juillet",
+            "aout",
+            "septembre",
+            "octobre",
+            "novembre",
+            "decembre",
+        ]
         assert any(m in sub for m in mois_noms)
 
     def test_format_slash_preserve(self):
@@ -119,9 +131,20 @@ class TestEdgeCases:
 def _parse_date(s: str) -> datetime.date | None:
     """Parse une date JJ/MM/AAAA ou JJ mois AAAA."""
     import re
+
     months = {
-        "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
-        "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
+        "janvier": 1,
+        "fevrier": 2,
+        "mars": 3,
+        "avril": 4,
+        "mai": 5,
+        "juin": 6,
+        "juillet": 7,
+        "aout": 8,
+        "septembre": 9,
+        "octobre": 10,
+        "novembre": 11,
+        "decembre": 12,
     }
     m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", s)
     if m:

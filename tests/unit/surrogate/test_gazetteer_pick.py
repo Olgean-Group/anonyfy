@@ -76,9 +76,7 @@ def test_pick_distinct_scopes_give_distinct_substituts():
     """>= 80% de substituts distincts sur 100 scopes distincts (critère 4)."""
     gaz = load_prenoms()
     values = {
-        pick(
-            "prenom", f"prenom-{i}", scope=f"scope-{i}", key=_KEY, gazetteer=gaz, gender="M"
-        ).name
+        pick("prenom", f"prenom-{i}", scope=f"scope-{i}", key=_KEY, gazetteer=gaz, gender="M").name
         for i in range(100)
     }
     assert len(values) >= 80, f"seulement {len(values)} substituts distincts sur 100"
@@ -176,9 +174,7 @@ def test_pick_distinct_keys_give_distinct_results_in_average():
     """Changer la clé change l'indice HMAC -> substituts distincts en moyenne."""
     gaz = load_prenoms()
     values = {
-        pick(
-            "prenom", "Jean", scope=_SCOPE, key=bytes([i]) * 16, gazetteer=gaz, gender="M"
-        ).name
+        pick("prenom", "Jean", scope=_SCOPE, key=bytes([i]) * 16, gazetteer=gaz, gender="M").name
         for i in range(100)
     }
     assert len(values) >= 80
@@ -211,9 +207,7 @@ def test_pick_index_matches_hmac_formula():
     gaz = load_prenoms()
     filtered = [e for e in gaz if e.genre == "M"]
     n = len(filtered)
-    msg = (
-        _SCOPE.encode("utf-8") + b"\x00" + b"prenom" + b"\x00" + b"Jean"
-    )
+    msg = _SCOPE.encode("utf-8") + b"\x00" + b"prenom" + b"\x00" + b"Jean"
     expected_index = int.from_bytes(hmac.new(_KEY, msg, hashlib.sha256).digest()[:8], "big") % n
     res = pick("prenom", "Jean", scope=_SCOPE, key=_KEY, gazetteer=gaz, gender="M")
     assert res.name == filtered[expected_index].name

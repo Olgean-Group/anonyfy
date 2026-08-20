@@ -9,10 +9,6 @@ Référence: PLAN.md phase 08, critères d'acceptation lignes 469-478.
 
 from __future__ import annotations
 
-import tempfile
-
-import pytest
-
 from anonyfy import Vault
 from anonyfy.types import EntityType
 

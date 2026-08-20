@@ -64,7 +64,9 @@ class TestRegisterCasePattern:
     def test_register_et_lookup_case_pattern(self, tmp_path):
         reg = ScopeRegistry(key=_KEY, scope="s", registry_path=str(tmp_path / "r.db"))
         reg.register_fpe(
-            "patronyme", "Marc Leroy", surrogate="CHARVET",
+            "patronyme",
+            "Marc Leroy",
+            surrogate="CHARVET",
             case_pattern=classify_case("Marc Leroy"),
         )
         record = reg.lookup("CHARVET")
@@ -116,7 +118,9 @@ class TestMigrationV1V2:
         assert record.case_pattern is None
         # La nouvelle colonne existe et accepte un case_pattern
         reg.register_fpe(
-            "patronyme", "Marc Leroy", surrogate="CHARVET",
+            "patronyme",
+            "Marc Leroy",
+            surrogate="CHARVET",
             case_pattern="T:T",
         )
         record2 = reg.lookup("CHARVET")

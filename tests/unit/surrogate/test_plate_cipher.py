@@ -4,7 +4,6 @@
 Substitut format-valide LL-DDD-LL[L]. Round-trip reversible.
 """
 
-
 from anonyfy.detect.validators.plate import validate
 from anonyfy.surrogate.plate_cipher import PlateCipher
 
