@@ -50,6 +50,17 @@ anonyfy mask fichier.txt --scope d1234
 anonyfy unmask reponse.txt --scope d1234
 ```
 
+## Installation
+
+```bash
+uv add anonyfy
+```
+
+Python ≥ 3.11. Le cœur ne dépend que de la bibliothèque standard et d'une
+bibliothèque cryptographique (FPE FF3-1 via `ff3`, isolée derrière
+`surrogate/fpe.py` — voir ADR 0001). Aucun téléchargement de modèle, fonctionne
+hors ligne.
+
 ---
 
 ## Couverture de détection (v1)
@@ -105,15 +116,25 @@ Ces limites sont volontaires et assumées. Les dissimuler discréditerait l'outi
    outil ne résout ça, et prétendre le contraire serait malhonnête.
 3. **Le dictionnaire de code.** Un mapping déterministe *est* un code book. Qui
    obtient beaucoup de couples clair/substitut peut inverser. Mitigations : clé
-   secrète par déploiement, sel par scope, rotation de clé.
+   secrète par déploiement, sel par scope. La rotation de clé est reportée à v2 :
+   elle exigerait un registre stockant du clair, interdit par l'invariant 1 en v1.
 4. **La compromission de la clé.** La clé permet de tout inverser. Elle doit vivre
    dans le gestionnaire de secrets du client, jamais dans le dépôt, jamais dans le
    journal.
-5. **Les faux positifs sur les noms-mots courants.** « Boulanger », « rue Pierre »,
+5. **Le FPE sur petits domaines.** FF3-1 est faible quand l'espace des valeurs
+   possibles est réduit. anonyfy tranche par type : FPE pur sur les grands domaines
+   (NIR, SIREN, SIRET, IBAN, TVA, carte bancaire, téléphone) ; mécanisme registre
+   sur les petits (plaque SIV, référence de dossier). Détail dans l'ADR 0001.
+6. **La cohérence inter-type.** SIREN, SIRET et TVA intracommunautaire partagent
+   le même SIREN sous-jacent. anonyfy applique FPE indépendamment par type : le
+   SIRET substitué et la TVA substituée d'un même dossier peuvent reposer sur des
+   SIREN différents. La cohérence métier n'est pas garantie en v1. Reportée à v2
+   (OBJ-008).
+7. **Les faux positifs sur les noms-mots courants.** « Boulanger », « rue Pierre »,
    « Mme Rose » produiront des faux positifs. C'est le prix de l'auditabilité, et
    c'est la justification d'une couche modèle optionnelle plus tard. Le mode
    observation existe pour les découvrir avant la production.
-6. **Pas de service hébergé, jamais.** Le coffre et la clé restent chez le client.
+8. **Pas de service hébergé, jamais.** Le coffre et la clé restent chez le client.
    C'est une décision d'architecture, pas une étape de feuille de route, et c'est
    l'argument le plus fort.
 
@@ -138,6 +159,12 @@ qui a tort.
 Détail dans `architecture.md` : flux aller/retour, génération des substituts (FPE
 pour les identifiants, gazetteer + registre de scope pour le texte libre),
 résolution des collisions, traitement des appels d'outils.
+
+Les décisions cryptographiques (isolation de `ff3` derrière `surrogate/fpe.py`,
+FPE par type vs mécanisme registre, vecteurs FF3-1 du NIST, empreinte d'audit
+HMAC, politique de logging, figage du gazetteer, dates par bucket de mois,
+rotation de clé reportée à v2) sont figées dans l'**ADR 0001**
+(`docs/ADR/0001-fpe-ff3.md`), qui est la source de vérité avant l'implémentation.
 
 ---
 
