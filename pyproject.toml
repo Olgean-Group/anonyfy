@@ -66,3 +66,6 @@ select = ["E", "F", "W", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "synthetic: corpus synthétique de non-régression (D12, round-trip/injectivité, pas rappel)",
+]
