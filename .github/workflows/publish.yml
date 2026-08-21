@@ -1,0 +1,122 @@
+# Publish anonyfy - phase 22
+# Publication sur TestPyPI/PyPI via OIDC trusted publishing (pas de token).
+# Déclencheurs:
+#   - workflow_dispatch avec input `repository` (testpypi | pypi, défaut testpypi)
+#   - push de tag v*.*.*
+# Le job `build` rebuild les artefacts depuis zéro (reproductibilité), les
+# valide (tests, ruff, twine, garde-fou, smoke test wheel) puis les atteste.
+# Les jobs `publish-*` consomment l'artefact et publient via pypa/gh-action-pypi-publish.
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Target repository"
+        required: true
+        default: "testpypi"
+        type: choice
+        options: [testpypi, pypi]
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Synchroniser les dépendances
+        run: uv sync --extra dev
+
+      - name: Tests (pytest + couverture)
+        run: uv run pytest --cov=anonyfy --cov-report=term-missing
+
+      - name: Lint (ruff check)
+        run: uv run ruff check .
+
+      - name: Format (ruff format --check)
+        run: uv run ruff format --check .
+
+      - name: Vérifier tag == version paquet
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          python -c "import pathlib, tomllib, os; version=tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version']; tag=os.environ['RELEASE_TAG'].removeprefix('v'); raise SystemExit(f'tag {tag} does not match version {version}') if tag != version else None"
+
+      - name: Build (sdist + wheel)
+        run: uv build
+
+      - name: twine check
+        run: uv run twine check dist/*
+
+      - name: Garde-fou distribution
+        run: python scripts/check_distribution.py dist/*
+
+      - name: Smoke test wheel
+        run: |
+          python -m venv .release-venv
+          . .release-venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python -c "import anonyfy; print(anonyfy.__version__)"
+
+      - name: Uploader les distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Attester la provenance du build
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    steps:
+      - name: Récupérer les distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Publier sur TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: (github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi') || github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - name: Récupérer les distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Publier sur PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

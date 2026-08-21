@@ -28,14 +28,18 @@ dependencies = [
 anonyfy = "anonyfy.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/anonyfy/anonyfy"
-Repository = "https://github.com/anonyfy/anonyfy"
+Homepage = "https://github.com/Olgean-Group/anonyfy"
+Repository = "https://github.com/Olgean-Group/anonyfy"
+Issues = "https://github.com/Olgean-Group/anonyfy/issues"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "pytest-cov>=4",
     "ruff>=0.6",
     "pyyaml>=6",
+    "build>=1",
+    "twine>=5",
 ]
 
 [build-system]
@@ -46,12 +50,14 @@ build-backend = "hatchling.build"
 packages = ["src/anonyfy"]
 
 [tool.hatch.build.targets.sdist]
-include = [
+only-include = [
     "src/anonyfy",
     "LICENSE",
     "NOTICE",
     "README.md",
 ]
+# .gitignore est inclus par hatchling (force_include des fichiers d'exclusion
+# VCS) et intentionnellement autorisé dans la sdist (décision D29, standard PyPA).
 
 [tool.ruff]
 line-length = 100
