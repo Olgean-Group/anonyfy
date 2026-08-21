@@ -1,7 +1,10 @@
 # CI anonyfy - phase 02/22
-# Matrice Python 3.11 / 3.12 / 3.13 avec ruff check, ruff format --check et pytest
-# avec couverture. Un job `package` séparé (sur 3.13, après test) build sdist+wheel
-# et valide le contenu des artefacts (twine check + garde-fou check_distribution).
+# Gate bloquant: matrice Python 3.11 / 3.12 / 3.13 avec ruff check, ruff format
+# --check et pytest SANS couverture (garantit latence < 50ms et tous critères
+# v1, sans skew d'instrumentation coverage).
+# Job `coverage` (3.13, needs test): report informatif, ignore le test latence
+# (mesuré sans instrumentation skew dans le job test).
+# Job `package` (3.13, needs test): build sdist+wheel + twine check + garde-fou.
 # Déclenché sur push et pull request sur toutes les branches.
 name: ci
 
@@ -42,8 +45,33 @@ jobs:
       - name: Format (ruff format --check)
         run: uv run ruff format --check .
 
-      - name: Tests (pytest + couverture)
-        run: uv run pytest --cov=anonyfy --cov-report=term-missing
+      - name: Tests (pytest, gate bloquant sans coverage)
+        run: uv run pytest
+
+  coverage:
+    # Report de couverture informatif (pas de seuil fail). Le test de latence
+    # est ignoré ici car l'instrumentation coverage fausse sa mesure timing.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Synchroniser les dépendances
+        run: uv sync --extra dev
+
+      - name: Couverture (pytest --cov, latence ignorée)
+        run: uv run pytest --cov=anonyfy --cov-report=term-missing --ignore=tests/acceptance/test_latency.py
 
   package:
     # Build et validation des artefacts une seule fois (sur 3.13, après test).

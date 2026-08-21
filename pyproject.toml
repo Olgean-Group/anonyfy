@@ -56,9 +56,8 @@ only-include = [
     "NOTICE",
     "README.md",
 ]
-# .gitignore est inclus par défaut par hatchling (force_include des fichiers
-# d'exclusion VCS, builders/sdist.py); on tente quand même de l'exclure.
-exclude = [".gitignore"]
+# .gitignore est inclus par hatchling (force_include des fichiers d'exclusion
+# VCS) et intentionnellement autorisé dans la sdist (décision D29, standard PyPA).
 
 [tool.ruff]
 line-length = 100

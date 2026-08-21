@@ -43,6 +43,13 @@ def _run_script(*paths: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _assert_returncode(result: subprocess.CompletedProcess[str], expected: int) -> None:
+    """Assert le code de retour et affiche stdout/stderr en cas d'écart."""
+    assert result.returncode == expected, (
+        f"attendu {expected}, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    )
+
+
 def _make_sdist(path: Path, members: dict[str, bytes]) -> Path:
     """Construit une sdist .tar.gz avec les membres ``name -> content``."""
     with tarfile.open(path, "w:gz") as tar:
@@ -84,14 +91,14 @@ def test_clean_sdist_returns_zero(tmp_path: Path) -> None:
     """Une sdist propre ne contient aucun fichier interdit -> exit 0."""
     sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", CLEAN_SDIST)
     result = _run_script(sdist)
-    assert result.returncode == 0, f"attendu 0, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 0)
 
 
 def test_clean_wheel_returns_zero(tmp_path: Path) -> None:
     """Une wheel propre ne contient aucun fichier interdit -> exit 0."""
     wheel = _make_wheel(tmp_path / "anonyfy-0.1.0-py3-none-any.whl", CLEAN_WHEEL)
     result = _run_script(wheel)
-    assert result.returncode == 0, f"attendu 0, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 0)
 
 
 def test_sdist_with_bak_file_returns_one(tmp_path: Path) -> None:
@@ -100,7 +107,7 @@ def test_sdist_with_bak_file_returns_one(tmp_path: Path) -> None:
     members["anonyfy-0.1.0/src/anonyfy/vault.py.bak"] = b"old"
     sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", members)
     result = _run_script(sdist)
-    assert result.returncode == 1, f"attendu 1, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 1)
 
 
 def test_wheel_with_pycache_pyc_returns_one(tmp_path: Path) -> None:
@@ -109,7 +116,7 @@ def test_wheel_with_pycache_pyc_returns_one(tmp_path: Path) -> None:
     members["anonyfy/__pycache__/vault.cpython-311.pyc"] = b"\x00\x00"
     wheel = _make_wheel(tmp_path / "anonyfy-0.1.0-py3-none-any.whl", members)
     result = _run_script(wheel)
-    assert result.returncode == 1, f"attendu 1, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 1)
 
 
 def test_sdist_with_olgenius_dir_returns_one(tmp_path: Path) -> None:
@@ -118,7 +125,7 @@ def test_sdist_with_olgenius_dir_returns_one(tmp_path: Path) -> None:
     members["anonyfy-0.1.0/.olgenius/state.json"] = b"{}"
     sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", members)
     result = _run_script(sdist)
-    assert result.returncode == 1, f"attendu 1, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 1)
 
 
 def test_wheel_with_resume_md_returns_one(tmp_path: Path) -> None:
@@ -127,7 +134,7 @@ def test_wheel_with_resume_md_returns_one(tmp_path: Path) -> None:
     members["anonyfy/resume.md"] = b"session"
     wheel = _make_wheel(tmp_path / "anonyfy-0.1.0-py3-none-any.whl", members)
     result = _run_script(wheel)
-    assert result.returncode == 1, f"attendu 1, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 1)
 
 
 def test_sdist_with_corpus_real_returns_one(tmp_path: Path) -> None:
@@ -136,16 +143,16 @@ def test_sdist_with_corpus_real_returns_one(tmp_path: Path) -> None:
     members["anonyfy-0.1.0/tests/acceptance/corpus_real/doc_001.txt"] = b"secret"
     sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", members)
     result = _run_script(sdist)
-    assert result.returncode == 1, f"attendu 1, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 1)
 
 
-def test_sdist_with_gitignore_returns_one(tmp_path: Path) -> None:
-    """Une sdist contenant .gitignore -> exit 1."""
+def test_sdist_with_gitignore_returns_zero(tmp_path: Path) -> None:
+    """Une sdist contenant .gitignore -> exit 0 (.gitignore autorisé, standard PyPA)."""
     members = dict(CLEAN_SDIST)
     members["anonyfy-0.1.0/.gitignore"] = b"__pycache__/\n"
     sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", members)
     result = _run_script(sdist)
-    assert result.returncode == 1, f"attendu 1, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 0)
 
 
 def test_clean_sdist_and_wheel_together_return_zero(tmp_path: Path) -> None:
@@ -153,11 +160,13 @@ def test_clean_sdist_and_wheel_together_return_zero(tmp_path: Path) -> None:
     sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", CLEAN_SDIST)
     wheel = _make_wheel(tmp_path / "anonyfy-0.1.0-py3-none-any.whl", CLEAN_WHEEL)
     result = _run_script(sdist, wheel)
-    assert result.returncode == 0, f"attendu 0, obtenu {result.returncode}: {result.stdout}{result.stderr}"
+    _assert_returncode(result, 0)
 
 
 def test_no_arguments_reports_usage() -> None:
     """Sans argument, le script affiche un message d'usage et quitte en erreur."""
     result = _run_script()
     assert result.returncode != 0
-    assert result.stderr.strip() or result.stdout.strip(), "aucun message affiché pour l'absence d'argument"
+    assert result.stderr.strip() or result.stdout.strip(), (
+        "aucun message affiché pour l'absence d'argument"
+    )
