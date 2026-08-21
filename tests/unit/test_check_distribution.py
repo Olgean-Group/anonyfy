@@ -11,7 +11,11 @@ Fichiers/chemins interdits dans une distribution anonyfy:
   - ``corpus_real/``    (corpus réel RGPD, jamais dans le dépôt)
   - ``__pycache__/``    (bytecode)
   - ``*.pyc``           (bytecode)
-  - ``.gitignore``      (config locale de dépôt)
+
+``.gitignore`` est intentionnellement autorisé dans la sdist (standard PyPA,
+hatchling force-include des fichiers d'exclusion VCS; inoffensif: patterns
+d'ignorance seulement, aucune donnée sensible — décision D29). Le test
+``test_sdist_with_gitignore_returns_zero`` valide ce contrat.
 
 Le test construit de fausses archives (``tarfile``/``zipfile``) en mémoire et
 invoque le script en sous-processus pour valider le vrai contrat de sortie
