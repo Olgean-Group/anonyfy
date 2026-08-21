@@ -1,0 +1,16 @@
+{
+  "_comment": "Valeurs claires sensibles (connues par construction) qui ne doivent pas fuiter dans le texte masque. Utilisees par test_no_leak.py. Format: {nom_doc: [valeurs_claires]}. Pour les emails, le local-part (avant @) est liste. Ces valeurs ne sont PAS des annotations de rappel (le corpus synthetique ne mesure pas le rappel, D12).",
+  "doc_001.txt": ["Jean", "Dupont", "3 mai 1990", "rue de la Paix", "Paris", "73282932000033"],
+  "doc_002.txt": ["732829320", "FR7630006000011234567890189"],
+  "doc_003.txt": ["FR44732829320", "4539578743346873"],
+  "doc_004.txt": ["0612345678", "AB-123-CD"],
+  "doc_005.txt": ["275032917028004", "15 mars 1990"],
+  "doc_006.txt": ["jean.o'brien"],
+  "doc_007.txt": ["étienne.été"],
+  "doc_008.txt": ["jean.pierre.marie.dupont"],
+  "doc_009.txt": ["Marie", "Martin", "avenue des Champs", "Paris"],
+  "doc_010.txt": ["15/03/1990", "12 avril 1985"],
+  "doc_011.txt": ["275032917028004", "0612345678", "jean.pierre"],
+  "doc_012.txt": ["Bernard", "Leroy", "12 avril 1980", "boulevard Saint-Michel", "Paris", "73282932000033", "FR7630006000011234567890189"],
+  "doc_013.txt": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+}
