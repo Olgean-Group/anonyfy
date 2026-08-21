@@ -18,7 +18,10 @@ Référence: PLAN.md phase 08, invariants 1/2/3/4, architecture §4/§6.
 
 from __future__ import annotations
 
+from collections import Counter
+
 from anonyfy.audit import AuditLog
+from anonyfy.report import render_report
 from anonyfy.resolve.aho_corasick import AhoCorasick
 from anonyfy.surrogate.case_pattern import apply_case
 from anonyfy.surrogate.engine import Engine
@@ -58,6 +61,9 @@ class Vault:
             reference_patterns=reference_patterns,
         )
         self._audit = audit
+        self._type_counts: Counter = Counter()
+        self._rule_ids: set[str] = set()
+        self._mask_calls = 0
 
     def mask(self, text: str) -> MaskedText:
         """Masque les identifiants structurés de ``text``.
@@ -71,6 +77,10 @@ class Vault:
         (D10, invariant 1).
         """
         result = self._engine.mask(text)
+        self._mask_calls += 1
+        for span in result.entities:
+            self._type_counts[span.type] += 1
+            self._rule_ids.add(span.rule_id)
         if self._audit is not None:
             self._audit.record(
                 key=self._key,
@@ -124,6 +134,20 @@ class Vault:
         for start, end, clear in replacements:
             result = result[:start] + clear + result[end:]
         return result
+
+    def report(self) -> str:
+        """Produit un rapport d'activité lisible par un non-développeur (PRD F10).
+
+        Retourne une chaîne Markdown synthétisant l'activité du Vault: types
+        rencontrés, volumes, règles actives, version des gazetteers. Structure
+        stable pour diff (pas de timestamp variable). Ne contient jamais de
+        valeur claire ni de substitut (invariant 1).
+        """
+        return render_report(
+            type_counts=self._type_counts,
+            rule_ids=self._rule_ids,
+            mask_calls=self._mask_calls,
+        )
 
     def close(self) -> None:
         """Ferme le registre (commit + fermeture SQLite)."""
