@@ -50,12 +50,15 @@ build-backend = "hatchling.build"
 packages = ["src/anonyfy"]
 
 [tool.hatch.build.targets.sdist]
-include = [
+only-include = [
     "src/anonyfy",
     "LICENSE",
     "NOTICE",
     "README.md",
 ]
+# .gitignore est inclus par défaut par hatchling (force_include des fichiers
+# d'exclusion VCS, builders/sdist.py); on tente quand même de l'exclure.
+exclude = [".gitignore"]
 
 [tool.ruff]
 line-length = 100
