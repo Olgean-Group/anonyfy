@@ -28,7 +28,22 @@ from anonyfy.surrogate.engine import Engine
 from anonyfy.surrogate.registry import ScopeRegistry
 from anonyfy.types import EntityType, MaskedText
 
-__all__ = ["Vault"]
+__all__ = ["UnresolvedSpanError", "Vault"]
+
+# Seuil de confiance pour « span faible non confirmé par contexte » (phase 17).
+# Un span avec déclencheur contextuel fort (« M. », « né(e) le ») a confidence
+# 0.9 (>= seuil, fort). Un span sans déclencheur a confidence 0.5 (< seuil,
+# faible). Ce seuil est interne au mode policy (pas de changement de
+# l'arbitrage phase 13) — à valider par l'orchestrateur (D27 ou suivant).
+WEAK_CONFIDENCE_THRESHOLD: float = 0.8
+
+
+class UnresolvedSpanError(Exception):
+    """Levée en ``policy="strict"`` quand un span de confiance faible non
+    confirmé par contexte est rencontré (confidence < seuil).
+
+    Référence: PLAN.md phase 17 (PRD F8), critère 3.
+    """
 
 
 class Vault:
@@ -50,9 +65,13 @@ class Vault:
         registry_path: str,
         reference_patterns: list[str] | None = None,
         audit: AuditLog | None = None,
+        policy: str = "permissive",
     ) -> None:
+        if policy not in ("permissive", "strict"):
+            raise ValueError(f"policy doit être 'permissive' ou 'strict', reçu {policy!r}")
         self._key = key
         self._scope = scope
+        self._policy = policy
         self._registry = ScopeRegistry(key=key, scope=scope, registry_path=registry_path)
         self._engine = Engine(
             key=key,
@@ -65,28 +84,70 @@ class Vault:
         self._rule_ids: set[str] = set()
         self._mask_calls = 0
 
-    def mask(self, text: str) -> MaskedText:
+    def mask(self, text: str, *, observe: bool = False) -> MaskedText:
         """Masque les identifiants structurés de ``text``.
 
         Renvoie un ``MaskedText``: ``.text`` contient les substituts FPE (jamais
         le clair, invariant 1), ``.entities`` pointe vers les substituts réels.
 
+        Si ``observe=True`` (phase 17, PRD F7): détecte les spans, les journalise
+        (audit), ne substitue rien, ne peuple pas le registre. ``.text`` est le
+        texte original inchangé, ``.entities`` contient les spans détectés (non
+        substitués, avec leur confidence/rule_id de détection).
+
         Si un ``AuditLog`` a été fourni au constructeur, enregistre une ligne
         d'audit (méta uniquement: scope, compte par type, rule_ids, empreinte
-        HMAC-SHA-256(key, text)). Ni le clair ni les substituts ne sont écrits
-        (D10, invariant 1).
+        HMAC-SHA-256(key, text), et avertissement sur spans faibles en policy
+        permissive). Ni le clair ni les substituts ne sont écrits (D10, invariant 1).
+
+        Si ``policy="strict"`` et qu'un span de confiance faible non confirmé par
+        contexte (confidence < seuil) est rencontré, lève ``UnresolvedSpanError``.
         """
+        if observe:
+            result = self._engine.mask(text, observe=True)
+            self._mask_calls += 1
+            for span in result.entities:
+                self._type_counts[span.type] += 1
+                self._rule_ids.add(span.rule_id)
+            if self._audit is not None:
+                self._audit.record(
+                    key=self._key,
+                    text=text,
+                    scope=self._scope,
+                    entities=result.entities,
+                )
+            return result
+
+        # Non-observe: vérifier la policy sur les spans détectés avant substitution.
+        resolved = self._engine.detect(text)
+        weak = [s for s in resolved if s.confidence < WEAK_CONFIDENCE_THRESHOLD]
+        if self._policy == "strict" and weak:
+            types = ", ".join(sorted({s.type.value for s in weak}))
+            raise UnresolvedSpanError(
+                f"span(s) de confiance faible non confirmé(s) par contexte en "
+                f"policy strict: {types} (confidence < {WEAK_CONFIDENCE_THRESHOLD})"
+            )
+
         result = self._engine.mask(text)
         self._mask_calls += 1
         for span in result.entities:
             self._type_counts[span.type] += 1
             self._rule_ids.add(span.rule_id)
         if self._audit is not None:
+            weak_meta = [
+                {
+                    "entity_type": s.type.value,
+                    "confidence": s.confidence,
+                    "rule_id": s.rule_id,
+                }
+                for s in weak
+            ]
             self._audit.record(
                 key=self._key,
                 text=text,
                 scope=self._scope,
                 entities=result.entities,
+                weak_spans=weak_meta,
             )
         return result
 

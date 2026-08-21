@@ -38,12 +38,19 @@ class AuditLog:
         text: str,
         scope: str,
         entities,
+        weak_spans=None,
     ) -> None:
         """Écrit une ligne d'audit pour un appel ``mask(text)``.
 
-        ``entities`` est un itérable de ``Span`` (les substituts détectés dans
-        le texte masqué). L'empreinte est calculée sur ``text`` (clair d'entrée,
-        jamais persisté) avec ``key`` (HMAC-SHA-256).
+        ``entities`` est un itérable de ``Span`` (les spans détectés/substituts
+        dans le texte masqué). L'empreinte est calculée sur ``text`` (clair
+        d'entrée, jamais persisté) avec ``key`` (HMAC-SHA-256).
+
+        ``weak_spans`` (phase 17, optionnel) est une liste de dicts de méta pour
+        les spans de confiance faible non confirmés par contexte (policy
+        permissive). Chaque dict ne contient QUE des méta (``entity_type``,
+        ``confidence``, ``rule_id``), JAMAIS la valeur du span ni le texte clair
+        (invariant 1, D10). Utilisé pour journaliser un avertissement sans fuite.
         """
         digest = hmac.new(key, text.encode("utf-8"), hashlib.sha256).hexdigest()
         counts = Counter(span.type.value for span in entities)
@@ -55,6 +62,8 @@ class AuditLog:
             "span_count_by_type": dict(counts),
             "rule_ids": rule_ids,
         }
+        if weak_spans is not None:
+            entry["weak_spans"] = weak_spans
         line = json.dumps(entry, ensure_ascii=False, sort_keys=True)
         with self._path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
