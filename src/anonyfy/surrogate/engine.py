@@ -112,7 +112,7 @@ class Engine:
         self._cipher_email = EmailCipher(key, scope)
         self._cipher_date = DateCipher(key, scope)
 
-    def mask(self, text: str) -> MaskedText:
+    def mask(self, text: str, *, observe: bool = False) -> MaskedText:
         """Masque tous les identifiants détectés dans ``text``.
 
         Détecte → arbitre → chiffre → registre → substitution droite-à-gauche.
@@ -120,9 +120,20 @@ class Engine:
         le clair, invariant 1) et ``.entities`` pointe vers les substituts réels.
         Les valeurs non masquables (nom inconnu du gazetteer, format invalide)
         sont laissées en clair (choix D22(ii), fuite résiduelle documentée).
+
+        Si ``observe=True`` (phase 17, PRD F7): détecte et arbitre seulement, ne
+        substitue rien, ne peuple pas le registre. Renvoie un ``MaskedText``
+        dont ``.text`` == texte original inchangé et ``.entities`` == spans
+        détectés (avec leur confidence/rule_id de détection, non substitués).
         """
         spans = self._detect_all(text)
         resolved = resolve_overlaps(spans)
+
+        if observe:
+            # Mode observation (phase 17): détection seule, pas de substitution,
+            # pas de registre. Les offsets pointent vers le texte original.
+            entities = tuple(resolved)
+            return MaskedText(text=text, entities=entities)
 
         substitutions: list[tuple[int, int, str, EntityType]] = []
         for span in resolved:
@@ -215,6 +226,16 @@ class Engine:
         if etype == EntityType.DATE:
             return self._cipher_date.decrypt(surrogate)
         return None
+
+    def detect(self, text: str) -> list[Span]:
+        """Détecte et arbitre les spans de ``text`` sans substituer (phase 17).
+
+        Renvoie les spans résolus (non chevauchants, triés par position) avec
+        leur confidence/rule_id de détection. Ne modifie pas le registre.
+        Utilisé par ``Vault`` pour la policy de fermeture (strict/permissive)
+        et le mode observation.
+        """
+        return resolve_overlaps(self._detect_all(text))
 
     def _detect_all(self, text: str) -> list[Span]:
         """Détecte tous les identifiants (FPE + non-FPE)."""

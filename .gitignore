@@ -9,3 +9,5 @@ build/
 .olgenius/
 resume.md
 src/anonyfy/vault.py.bak
+src/anonyfy/types.py.bak
+src/anonyfy/audit.py.bak
