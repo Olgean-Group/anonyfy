@@ -24,6 +24,9 @@ dependencies = [
     "ff3>=1.0.3",
 ]
 
+[project.scripts]
+anonyfy = "anonyfy.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/anonyfy/anonyfy"
 Repository = "https://github.com/anonyfy/anonyfy"
