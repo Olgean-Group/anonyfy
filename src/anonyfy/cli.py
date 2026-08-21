@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import IO
 
 from anonyfy.audit import AuditLog
+from anonyfy.surrogate.registry import default_registry_path
 from anonyfy.vault import Vault
 
 __all__ = ["build_parser", "main"]
@@ -121,14 +122,15 @@ def _resolve_key(args: argparse.Namespace, err_stream: IO[str]) -> bytes | None:
 def _registry_path(args: argparse.Namespace, scope: str) -> str:
     """Retourne le chemin du registre: ``--registry`` ou défaut explicite.
 
-    Défaut D4/D11: ``~/.anonyfy/registries/<scope>.db``. Le répertoire parent
-    est créé si nécessaire.
+    Défaut D4/D11: ``~/.anonyfy/registries/<scope>.db``. Le défaut est calculé
+    par ``default_registry_path`` qui sanitize le scope (remplace tout
+    caractère non alnum/-/_/. par ``_``), bloquant le path traversal via
+    ``--scope`` (phase 23, Q2c). Le répertoire parent est créé par
+    ``ScopeRegistry.__init__`` (registry.py), pas besoin de le faire ici.
     """
     if getattr(args, "registry", None):
         return args.registry
-    default = Path.home() / ".anonyfy" / "registries" / f"{scope}.db"
-    default.parent.mkdir(parents=True, exist_ok=True)
-    return str(default)
+    return default_registry_path(scope)
 
 
 def _read_input(path: str, err_stream: IO[str]) -> str | None:

@@ -17,7 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from anonyfy.cli import main
+from anonyfy.cli import _registry_path, main
+from anonyfy.surrogate.registry import default_registry_path
 
 # Clé de test hex: 32 hex chars = 16 octets nuls. Valeur nulle acceptable pour
 # la logique métier (cf. tests existants key=b'0'*16); le round-trip FF3 est
@@ -406,3 +407,57 @@ class TestKeyValidation:
         assert not out.exists()
         err = capsys.readouterr().err
         assert "clé" in err.lower()
+
+
+class TestRegistryPathSanitization:
+    """Phase 23 (Q2c): _registry_path sanitize le scope (path traversal).
+
+    Sans sanitization, ``--scope "../../../tmp/evil"`` produit
+    ``~/.anonyfy/registries/../../../tmp/evil.db`` = ``/tmp/evil.db``
+    (path traversal via --scope). ``default_registry_path`` sanitize déjà;
+    la CLI doit déléguer à cette fonction au lieu de recalculer le chemin.
+    """
+
+    def test_registry_path_sanitizes_traversal_scope(self):
+        """Un scope malicieux ne produit pas un chemin hors du base."""
+        args = type("Args", (), {"registry": None})()
+        scope_malicieux = "../../../tmp/anonyfy_evil"
+        chemin = _registry_path(args, scope_malicieux)
+        base = os.path.realpath(os.path.expanduser("~/.anonyfy/registries"))
+        real_chemin = os.path.realpath(chemin)
+        assert real_chemin.startswith(base + os.sep), (
+            f"chemin {real_chemin} hors du base {base} (path traversal non bloqué)"
+        )
+        assert "/tmp/" not in real_chemin
+
+    def test_registry_path_equals_default_registry_path(self):
+        """_registry_path délègue à default_registry_path (Q2b + Q2c)."""
+        args = type("Args", (), {"registry": None})()
+        for scope in ["default", "dossier-47", "../../../tmp/evil", "a/b/c"]:
+            chemin = _registry_path(args, scope)
+            attendu = default_registry_path(scope)
+            assert chemin == attendu, (
+                f"_registry_path({scope!r}) = {chemin!r} != default_registry_path = {attendu!r}"
+            )
+
+    def test_registry_path_explicit_registry_passthrough(self, tmp_path):
+        """--registry explicite court-circuite le défaut (non-régression)."""
+        explicit = str(tmp_path / "custom.db")
+        args = type("Args", (), {"registry": explicit})()
+        chemin = _registry_path(args, "nimporte")
+        assert chemin == explicit
+
+    def test_registry_path_calls_default_registry_path(self, monkeypatch):
+        """Vérifie que _registry_path appelle default_registry_path (Q2b)."""
+        called = {"ok": False}
+
+        def fake(scope: str) -> str:
+            called["ok"] = True
+            return os.path.join("/fake", f"{scope}.db")
+
+        import anonyfy.cli as cli_mod
+
+        monkeypatch.setattr(cli_mod, "default_registry_path", fake)
+        args = type("Args", (), {"registry": None})()
+        _registry_path(args, "s")
+        assert called["ok"], "default_registry_path n'a pas été appelée"
