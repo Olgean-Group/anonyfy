@@ -80,6 +80,62 @@ démarrer un nouveau scope+registre si compromission suspectée (les anciens
 substituts ne sont plus déchiffrables, mais l'attaque est contenue au scope
 compromis).
 
+## Modèle de menace du projet (PRD §8)
+
+Au-delà de la gestion de clé (menaces 1 à 6 ci-dessus), le PRD §8
+recense quatre menaces structurelles que la pseudonymisation réversible
+**ne résout pas**. Les documenter explicitement est un différenciateur:
+personne d'autre ne le fait, et les dissimuler discréditerait l'outil.
+
+### Menace 7 — Ré-identification par le contexte
+
+La **ré-identification par le contexte** est le risque résiduel de toute
+pseudonymisation. Un substitut peut ré-identifier si le contexte autour est
+unique. « Le
+dirigeant de la société de menuiserie de Moulidars » reste identifiant
+même si le nom est substitué. Aucun outil ne résout ça, et prétendre le
+contraire serait malhonnête. Le risque est résiduel et accepté (PRD §8
+point 1, *EDPS c. CRU* — raisonnement contextuel, voir `docs/JURIDIQUE.md`).
+
+### Menace 8 — Dictionnaire de code
+
+Le **dictionnaire de code** est la faiblesse inhérente au mapping déterministe.
+Un mapping déterministe *est* un code book. Qui obtient un grand nombre de
+couples clair/substitut pour un scope peut inverser. Mitigations: clé
+secrète par déploiement, sel par scope (déterminisme scopé, invariant 2).
+La rotation de clé est reportée à v2 (T1, ADR 0001 §13): elle exigerait
+un registre stockant du clair, interdit par l'invariant 1.
+
+### Menace 9 — Compromission de la clé
+
+La **compromission de la clé** est la menace racine: la clé permet de tout
+inverser. C'est la racine du montage (menaces 1 à 6
+ci-dessus). La clé doit vivre dans le gestionnaire de secrets du client,
+jamais dans le dépôt, jamais dans le journal, jamais en argument CLI en
+clair. Toute la pseudonymisation tombe si la clé est compromise.
+
+### Menace 10 — FPE sur petits domaines
+
+FF3-1 est faible quand l'espace des valeurs possibles est réduit (plaque
+SIV ~1000 valeurs, référence de dossier configurable). anonyfy tranche par
+type (D2, ADR 0001 §4): FPE pur sur les grands domaines (NIR, SIREN,
+SIRET, IBAN, TVA, carte bancaire, téléphone); permutation keyée Feistel
+(ADR 0003) sur les petits domaines non-FPE (patronyme, prénom, commune,
+voie, plaque SIV, référence de dossier, date, email local-part). La
+bijectivité est garantie, mais les points fixes existent (D23:
+probabilité ~1/N par clair, détectés et alertés, jamais silencieux).
+
+### Menace 11 — Date par bucket de mois (D8)
+
+La date substituée est ré-identifiable par contexte: le décalage par
+bucket de mois (D8, ADR 0001 §10) préserve le mois et l'année mais pas
+le jour (clampé à [1, 28]). Un bucket de date ou un mois NIR reste
+ré-identifiable si le contexte autour est unique. La limite est assumée
+et documentée (PRD §8 point 1): le décalage ne prétend pas empêcher la
+ré-identification par contexte.
+
+---
+
 ## Recommandations de déploiement
 
 1. **Provisionner la clé** via un gestionnaire de secrets ou `systemd-creds`,

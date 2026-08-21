@@ -50,6 +50,13 @@ anonyfy mask fichier.txt --scope d1234
 anonyfy unmask reponse.txt --scope d1234
 ```
 
+`mask_json` / `unmask_json` parcourent un payload JSON et ne masquent que
+les feuilles chaîne (jamais les clés, jamais `function.name`). C'est une
+**primitive, pas un proxy** (OBJ-025) : le proxy compatible OpenAI est
+prévu en v2 ; `mask_json` expose déjà la primitive de parcours pour que
+l'intégrateur puisse câbler le masquage de payloads structurés en
+attendant.
+
 ## Installation
 
 ```bash
@@ -123,18 +130,26 @@ Ces limites sont volontaires et assumées. Les dissimuler discréditerait l'outi
    journal.
 5. **Le FPE sur petits domaines.** FF3-1 est faible quand l'espace des valeurs
    possibles est réduit. anonyfy tranche par type : FPE pur sur les grands domaines
-   (NIR, SIREN, SIRET, IBAN, TVA, carte bancaire, téléphone) ; mécanisme registre
-   sur les petits (plaque SIV, référence de dossier). Détail dans l'ADR 0001.
-6. **La cohérence inter-type.** SIREN, SIRET et TVA intracommunautaire partagent
+   (NIR, SIREN, SIRET, IBAN, TVA, carte bancaire, téléphone) ; permutation keyée
+   Feistel (ADR 0003) sur les petits domaines non-FPE (patronyme, prénom, commune,
+   voie, plaque SIV, référence de dossier, date, email local-part). La bijectivité
+   est garantie, mais les points fixes existent (D23, probabilité ~1/N par clair,
+   détectés et alertés). Détail dans l'ADR 0001 et l'ADR 0003.
+6. **Les dates par bucket de mois.** Le décalage par bucket de mois (D8) préserve
+   le mois et l'année mais pas le jour (clampé à [1, 28]). Une date substituée
+   reste ré-identifiable par contexte si le bucket de date ou le mois est unique
+   dans le contexte. La limite est assumée (§8 point 1) : le décalage ne prétend
+   pas empêcher la ré-identification. Détail dans l'ADR 0001 §10.
+7. **La cohérence inter-type.** SIREN, SIRET et TVA intracommunautaire partagent
    le même SIREN sous-jacent. anonyfy applique FPE indépendamment par type : le
    SIRET substitué et la TVA substituée d'un même dossier peuvent reposer sur des
    SIREN différents. La cohérence métier n'est pas garantie en v1. Reportée à v2
    (OBJ-008).
-7. **Les faux positifs sur les noms-mots courants.** « Boulanger », « rue Pierre »,
+8. **Les faux positifs sur les noms-mots courants.** « Boulanger », « rue Pierre »,
    « Mme Rose » produiront des faux positifs. C'est le prix de l'auditabilité, et
    c'est la justification d'une couche modèle optionnelle plus tard. Le mode
    observation existe pour les découvrir avant la production.
-8. **Pas de service hébergé, jamais.** Le coffre et la clé restent chez le client.
+9. **Pas de service hébergé, jamais.** Le coffre et la clé restent chez le client.
    C'est une décision d'architecture, pas une étape de feuille de route, et c'est
    l'argument le plus fort.
 
@@ -170,18 +185,26 @@ rotation de clé reportée à v2) sont figées dans l'**ADR 0001**
 
 ## Statut
 
-Proposition · v0.1 · Août 2026. Le code n'est pas encore publié. Le jalon M0
-(squelette du paquet, CI, licence) est en cours.
+v0.1 · Août 2026. Jalons M0 à M4 livrés (phases 01 à 19) : paquet
+installable, CI verte, validateurs arithmétiques et de format, FPE FF3-1
+sur les grands domaines, registre de scope SQLite, Aho-Corasick, API
+publique `Vault` (`mask`/`unmask`/`mask_json`/`unmask_json`/`report`),
+gazetteers figés, arbitrage complet, journal d'audit HMAC, rapport DPO,
+CLI `scan`/`mask`/`unmask`, mode observation, politique de fermeture,
+corpus de test. La phase 20 (cette documentation) finalise le jalon M4.
 
 Feuille de route :
 
-| Jalon | Contenu |
-|---|---|
-| **M0** | Squelette du paquet, CI, licence, README qui vend |
-| **M1** | Validateurs structurés + FPE + aller-retour |
-| **M2** | Gazetteers, registre de scope, résolution de collisions |
-| **M3** | CLI, mode observation, journal, rapport |
-| **M4** | Documentation, corpus de test public, billet de lancement |
+| Jalon | Contenu | Statut |
+|---|---|---|
+| **M0** | Squelette du paquet, CI, licence, README | Livré |
+| **M1** | Validateurs structurés + FPE + aller-retour | Livré |
+| **M2** | Gazetteers, registre de scope, résolution de collisions | Livré |
+| **M3** | CLI, mode observation, journal, rapport | Livré |
+| **M4** | Documentation, corpus de test public, billet de lancement | En cours |
+
+Voir `CHANGELOG.md` pour le détail des phases livrées et
+`docs/TUTORIAL.md` pour le guide d'intégration.
 
 ## Licence
 
