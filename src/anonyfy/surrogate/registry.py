@@ -204,13 +204,23 @@ class ScopeRegistry:
         self._check_or_migrate_schema()
 
     def _check_or_migrate_schema(self) -> None:
-        row = self._conn.execute("SELECT schema_version FROM meta").fetchone()
+        row = self._conn.execute("SELECT schema_version, scope FROM meta").fetchone()
         if row is None:
             self._conn.execute(
                 "INSERT INTO meta(schema_version, scope) VALUES (?, ?)",
                 (CURRENT_SCHEMA_VERSION, self._scope),
             )
             return
+        # Défense en profondeur (phase 23, Q1): vérifier que le scope stocké
+        # correspond au scope demandé. Sans ce check, ouvrir un DB existant avec
+        # un scope différent chargerait les entries (HMAC calculés avec l'ancien
+        # scope) tout en utilisant le nouveau scope pour les nouvelles
+        # réservations -> invariant 2 (déterminisme scopé) cassé silencieusement.
+        stored_scope = row[1] if len(row) > 1 else None
+        if stored_scope != self._scope:
+            raise RegistryError(
+                f"scope du registre '{stored_scope}' != scope demandé '{self._scope}'"
+            )
         try:
             version = int(row[0])
         except (TypeError, ValueError) as exc:
