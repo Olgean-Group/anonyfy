@@ -10,3 +10,6 @@ build/
 resume.md
 # Sauvegardes locales (règle globale, couvre src/anonyfy/*.bak)
 *.bak
+# Coverage (artefacts pytest-cov, locaux)
+.coverage
+htmlcov/
