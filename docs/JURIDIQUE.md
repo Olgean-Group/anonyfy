@@ -94,9 +94,42 @@ Le DPO client reste responsable de:
 - la **durée de conservation** du registre de scope (qui atteste l'appartenance
   des substituts et permet la réversibilité) et de sa purge en fin de besoin.
 
-## 6. Limite de ce document
+## 6. Références et limites de ce document
 
-Ce document est un **cadrage**, pas un avis juridique. Il sera complété en
-phase 20 (documentation finale) avec des références précises (jurisprudence,
-guidelines CEPD, recommandations CNIL). En attendant, toute décision
-d'usage repose sur la propre analyse du client et de son conseil.
+### 6.1 Références
+
+- **RGPD** — Règlement (UE) 2016/679 du Parlement européen et du Conseil
+  du 27 avril 2016, art. 4 (définitions : donnée personnelle,
+  pseudonymisation), art. 32 (sécurité du traitement).
+- **CJUE, *EDPS c. CRU***, septembre 2025 — approche relative de la
+  notion de donnée personnelle pour des données pseudonymisées transmises
+  à un destinataire sans moyen raisonnable de ré-identifier. Jurisprudence
+  récente, encore discutée par le CEPD.
+- **CEPD** (Comité européen de la protection des données) — lignes
+  directrices sur la pseudonymisation et la notion de donnée personnelle;
+  à instruire au cas par cas.
+- **CNIL** — recommandations sur la pseudonymisation et les analyses
+  d'impact (AIP) pour les traitements impliquant un sous-traitant (le
+  fournisseur de LLM).
+- **EDPB** (Comité européen de la protection des données, ex-Article 29
+  WP) — avis sur l'anonymisation et la pseudonymisation.
+
+### 6.2 Limite de ce document
+
+Ce document est un **cadrage**, pas un avis juridique. La jurisprudence
+(*EDPS c. CRU*) et les lignes directrices du CEPD évoluent; toute décision
+d'usage repose sur la **propre analyse du client et de son conseil**. anonyfy
+ne fournit pas de conseil juridique et n'engage aucune responsabilité sur
+la qualification juridique d'un traitement. L'objectif reste l'honnêteté:
+ne pas surpromettre « conforme RGPD » là où la réalité est plus nuancée et
+plus intéressante (§2-3).
+
+### 6.3 Documentation associée
+
+- `README.md` — § « Ce que anonyfy ne fait pas » (limites §8).
+- `docs/MENACE.md` — modèle de menace (gestion de clé + 4 menaces §8).
+- `docs/ADR/0001-fpe-ff3.md` — décisions cryptographiques (empreinte
+  HMAC, logging méta, dates bucket de mois, rotation de clé hors v1).
+- `docs/ADR/0002-pas-de-service-heberge.md` — l'absence de service hébergé
+  est une condition du raisonnement *EDPS c. CRU* (la clé et le registre
+  restent chez le client).
