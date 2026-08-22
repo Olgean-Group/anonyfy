@@ -74,6 +74,11 @@ def _phrase_matches(
     extension.
     """
     best: tuple[int, int, str] | None = None
+    # Phase 32 — M4: court-circuit si le premier token ne peut demarrer aucune
+    # entree du gazetteer (prefiltre first_words). Evite ~8 joins + lookups pour
+    # les tokens non pertinents (la majorite dans un texte administratif).
+    if cfold_tokens[start_idx] not in gazetteer.first_words:
+        return best
     cfold_words: list[str] = []
     words: list[str] = []
     for k in range(start_idx, min(start_idx + _MAX_WORDS, len(tokens))):
