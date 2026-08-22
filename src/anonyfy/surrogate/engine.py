@@ -103,6 +103,28 @@ _FPE_RUN_DETECTORS: tuple[tuple[EntityType, object, str], ...] = (
     (EntityType.NIR, nir.detect, "nir-mod97"),
 )
 
+# Phase 34 — R1 (D34c): critère de « candidat nu ». Un span PATRONYME/PRENOM
+# dont la règle est l'un des gazetteers ou le context-capture et dont la
+# confidence < seuil (pas de déclencheur à proximité) est un candidat issu du
+# seul gazetteur : il ne produit un span qu'en strict (pour lever) ou en observe
+# (pour montrer) ; en permissive il est filtré au niveau du masquage (D34b).
+# Les spans déclenchés (confidence >= 0.8, dont context-capture à 0.8) ne sont
+# pas filtrés par ce critère (D34c/D34e) — ils restent soumis au filtre global
+# EXCLUDED_NOMS appliqué en amont (triggers.apply).
+_BARE_RULES: frozenset[str] = frozenset({"gazetteer-nom", "gazetteer-prenom", "context-capture"})
+# Même seuil que vault.WEAK_CONFIDENCE_THRESHOLD (0.8) — défini localement pour
+# éviter un import circulaire engine -> vault.
+_BARE_CONFIDENCE_THRESHOLD: float = 0.8
+
+
+def _is_bare_candidate(span: Span) -> bool:
+    """True si ``span`` est un candidat nu (gazetteur seul, sans déclencheur)."""
+    return (
+        span.type in (EntityType.PATRONYME, EntityType.PRENOM)
+        and span.rule_id in _BARE_RULES
+        and span.confidence < _BARE_CONFIDENCE_THRESHOLD
+    )
+
 
 # Phase 30 — S4: Permutation keyée sur [0, 100000) pour les CP (5 chiffres).
 # L'indice chiffré est stocké dans ``clear_index`` du registre; le substitut
@@ -188,6 +210,15 @@ class Engine:
             # pas de registre. Les offsets pointent vers le texte original.
             entities = tuple(resolved)
             return MaskedText(text=text, entities=entities)
+
+        # Phase 34 — R1 (D34b/D34c/D34e): filtrage des candidats nus au niveau
+        # du masquage non-observe. Un span PATRONYME/PRENOM issu du seul
+        # gazetteur sans déclencheur (confidence < 0.8) n'est pas substitué en
+        # permissive (le premier mot de phrase n'est plus masqué). Les spans
+        # déclenchés (confidence >= 0.8, ex. « M. Jean », « M. Dupont ») restent
+        # masqués. observe (plus haut) et la policy strict (Vault.mask, qui
+        # détecte en amont) voient encore ces spans faibles.
+        resolved = [s for s in resolved if not _is_bare_candidate(s)]
 
         substitutions: list[tuple[int, int, str, EntityType]] = []
         # Phase 30 — S4: pré-calcul des substituts CP composites (dépendent du
