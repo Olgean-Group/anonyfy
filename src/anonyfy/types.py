@@ -15,6 +15,19 @@ import dataclasses
 from enum import Enum
 
 
+class UnresolvedSpanError(Exception):
+    """Levée quand un span non masquable est rencontré en policy ``strict``.
+
+    Phase 17 (PRD F8): un span de confiance faible (non confirmé par contexte)
+    lève en ``strict``. Phase 35 (D35h): étendu au cas non masquable — un
+    substitut final == clair après sondage borné (point fixe ou scope saturé)
+    lève aussi en ``strict`` (aucune fuite silencieuse).
+
+    Définie ici (et ré-exportée par ``anonyfy.vault``) pour être importable par
+    ``Engine`` sans cycle d'imports (vault -> engine -> types).
+    """
+
+
 class EntityType(Enum):
     """Types d'entite personnels traites par anonyfy (PRD §7)."""
 
@@ -140,4 +153,5 @@ __all__ = [
     "MaskedText",
     "Rule",
     "Span",
+    "UnresolvedSpanError",
 ]

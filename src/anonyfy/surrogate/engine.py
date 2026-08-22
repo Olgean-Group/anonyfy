@@ -44,8 +44,8 @@ from anonyfy.surrogate.gazetteer_cipher import GazetteerCipher
 from anonyfy.surrogate.permutation import Permutation
 from anonyfy.surrogate.plate_cipher import PlateCipher
 from anonyfy.surrogate.reference_cipher import ReferenceCipher
-from anonyfy.surrogate.registry import ScopeRegistry
-from anonyfy.types import EntityType, MaskedText, Span
+from anonyfy.surrogate.registry import RegistryError, ScopeRegistry
+from anonyfy.types import EntityType, MaskedText, Span, UnresolvedSpanError
 
 __all__ = ["Engine", "TypeInfo"]
 
@@ -184,19 +184,28 @@ class Engine:
         self._cipher_email = EmailCipher(key, scope)
         self._cipher_date = DateCipher(key, scope)
 
-    def mask(self, text: str, *, observe: bool = False) -> MaskedText:
+    def mask(self, text: str, *, observe: bool = False, strict: bool = False) -> MaskedText:
         """Masque tous les identifiants détectés dans ``text``.
 
         Détecte → arbitre → chiffre → registre → substitution droite-à-gauche.
         Renvoie un ``MaskedText`` dont ``.text`` contient les substituts (jamais
         le clair, invariant 1) et ``.entities`` pointe vers les substituts réels.
         Les valeurs non masquables (nom inconnu du gazetteer, format invalide)
-        sont laissées en clair (choix D22(ii), fuite résiduelle documentée).
+        sont laissées en texte (choix D22(ii), fuite résiduelle documentée).
 
         Si ``observe=True`` (phase 17, PRD F7): détecte et arbitre seulement, ne
         substitue rien, ne peuple pas le registre. Renvoie un ``MaskedText``
         dont ``.text`` == texte original inchangé et ``.entities`` == spans
         détectés (avec leur confidence/rule_id de détection, non substitués).
+
+        Phase 35 — S1 (D35f/D35g/D35h): filet de sûreté global appliqué APRÈS
+        la boucle de substitution sur la liste des substitutions (tous les
+        chemins: CP, FPE, gazetteer, context-capture). Un substitut final ==
+        clair (point fixe, ou registre idempotent d'une version cassée) est une
+        fuite: en ``strict`` lève ``UnresolvedSpanError``; en permissive, sonde
+        déterministe bornée (max 1000, D35h) jusqu'à un substitut non
+        collisionnant (le registre reste le garde-fou), sinon émet un
+        ``UserWarning`` (D35g) et laisse le clair en place (dernier recours).
         """
         pairs = self._detect_all_with_format(text)
         spans = [s for s, _ in pairs]
@@ -231,7 +240,11 @@ class Engine:
                 surrogate, encrypted_idx = cp_data[id(span)]
                 if surrogate is None:
                     continue
-                self._registry.register_fpe(
+                # Idempotent: un clair déjà enregistré (ex. entrée d'une version
+                # cassée, substitut == clair) renvoie le substitut existant; on
+                # utilise le RETOUR pour que le filet global (D35f) voie le
+                # point fixe réel (sinon la fuite passerait inaperçue).
+                surrogate = self._registry.register_fpe(
                     span.type.value,
                     span.value,
                     surrogate=surrogate,
@@ -242,17 +255,17 @@ class Engine:
             substitute = self._encrypt_span(span)
             if substitute is None:
                 continue
-            # D23 garde-fou: un point fixe (substitut == clair) est une fuite
-            # résiduelle rare (Feistel != derangement). Alerte non silencieuse;
-            # le masquage continue avec le point fixe (pas d'exception).
-            if substitute == span.value:
-                warnings.warn(
-                    f"Point fixe permutation: {span.type.value} '{span.value}' "
-                    f"non masqué (substitut == clair)",
-                    stacklevel=2,
-                )
+            # D35f: un point fixe (substitut == clair, Feistel sans dérangement
+            # ~1 par gazetteer) n'est PAS enregistré: le filet global le corrige
+            # par sondage (D35i), ou lève/avertit en dernier recours (D35h/D35g).
+            if substitute.casefold() == span.value.casefold():
+                substitutions.append((span.start, span.end, substitute, span.type))
+                continue
             case_pattern = classify_case(span.value) if span.type in _GAZETTEER_TYPES else None
-            self._registry.register_fpe(
+            # Le retour de register_fpe est utilisé (idempotence: un même clair
+            # renvoie le substitut déjà enregistré, ce qui reste le substitut
+            # réel visible du unmask).
+            substitute = self._registry.register_fpe(
                 span.type.value,
                 span.value,
                 surrogate=substitute,
@@ -260,6 +273,22 @@ class Engine:
                 format_pattern=fp_map.get(id(span)),
             )
             substitutions.append((span.start, span.end, substitute, span.type))
+
+        # Phase 35 — S1 (D35f/D35g/D35h): filet de sûreté GLOBAL, appliqué
+        # APRÈS la boucle de substitution sur la liste complète (tous les
+        # chemins: CP, FPE, gazetteer, context-capture). En strict, un substitut
+        # final == clair lève (aucune fuite silencieuse); en permissive, sondage
+        # déterministe borné (max 1000, D35i/D35h), sinon UserWarning (D35g) et
+        # le clair reste en place (dernier recours, jamais en silence).
+        if strict:
+            for start, end, substitute, etype in substitutions:
+                if substitute.casefold() == text[start:end].casefold():
+                    raise UnresolvedSpanError(
+                        f"span non masquable en policy strict: {etype.value} "
+                        f"{text[start:end]!r} (substitut == clair après sondage borné)"
+                    )
+        else:
+            substitutions = self._apply_fixed_point_probe(text, substitutions)
 
         masked = text
         entities: list[Span] = []
@@ -285,12 +314,36 @@ class Engine:
         """Construit un GazetteerCipher paresseusement (OBJ-REC-107)."""
         return GazetteerCipher(self._key, self._scope, kind, loader())
 
+    def _cipher_for(self, etype: EntityType) -> GazetteerCipher | None:
+        """Cipher gazetteer du type (construit paresseusement), ou None.
+
+        Utilisé par ``_encrypt_span`` et par le sondage du filet (D35f/D35i):
+        seuls les types gazetteer ont un ``probe`` réversible.
+        """
+        if etype == EntityType.PATRONYME:
+            if self._cipher_patronyme is None:
+                self._cipher_patronyme = self._build_cipher("patronyme", load_noms)
+            return self._cipher_patronyme
+        if etype == EntityType.PRENOM:
+            if self._cipher_prenom is None:
+                self._cipher_prenom = self._build_cipher("prenom", load_prenoms)
+            return self._cipher_prenom
+        if etype == EntityType.COMMUNE:
+            if self._cipher_commune is None:
+                self._cipher_commune = self._build_cipher("commune", load_communes)
+            return self._cipher_commune
+        if etype == EntityType.VOIE:
+            if self._cipher_voie is None:
+                self._cipher_voie = self._build_cipher("voie", load_voies)
+            return self._cipher_voie
+        return None
+
     def _encrypt_span(self, span: Span) -> str | None:
         """Chiffre un span selon son type. Retourne le substitut ou None."""
         etype = span.type
         # NIR Corse 2A/2B (OBJ-REC-102): FPE digits ne supporte pas les lettres;
         # on substitue 2A->19 / 2B->18 puis on chiffre la forme digit. Pour un
-        # NIR 15 car. (cle 2) -> encrypt_nir; pour 16 car. (cle 3, exemples du
+        # NIR 15 car. (code 2) -> chiffre_nir; pour 16 car. (code 3, exemples du
         # critere) -> encrypt_cb (16 digits Luhn). Le substitut est all-digits
         # (sans 2A); le format_pattern restitue le 2A au unmask.
         if etype == EntityType.NIR and ("2A" in span.value or "2B" in span.value):
@@ -303,22 +356,9 @@ class Engine:
         if etype in _TYPES:
             encrypt_fn = _TYPES[etype].encrypt
             return encrypt_fn(span.value, key=self._key, scope=self._scope)
-        if etype == EntityType.PATRONYME:
-            if self._cipher_patronyme is None:
-                self._cipher_patronyme = self._build_cipher("patronyme", load_noms)
-            return self._cipher_patronyme.encrypt(span.value)
-        if etype == EntityType.PRENOM:
-            if self._cipher_prenom is None:
-                self._cipher_prenom = self._build_cipher("prenom", load_prenoms)
-            return self._cipher_prenom.encrypt(span.value)
-        if etype == EntityType.COMMUNE:
-            if self._cipher_commune is None:
-                self._cipher_commune = self._build_cipher("commune", load_communes)
-            return self._cipher_commune.encrypt(span.value)
-        if etype == EntityType.VOIE:
-            if self._cipher_voie is None:
-                self._cipher_voie = self._build_cipher("voie", load_voies)
-            return self._cipher_voie.encrypt(span.value)
+        cipher = self._cipher_for(etype)
+        if cipher is not None:
+            return cipher.encrypt(span.value)
         if etype == EntityType.PLAQUE_SIV:
             return self._cipher_plate.encrypt(span.value)
         if etype == EntityType.REFERENCE_DOSSIER:
@@ -330,6 +370,64 @@ class Engine:
             return self._cipher_date.encrypt(span.value)
         # CODE_POSTAL: géré par le pré-pass ``_compute_cp_surrogates`` dans mask;
         # tombe sur le return None par défaut (pas de cipher direct).
+        return None
+
+    def _apply_fixed_point_probe(self, text: str, substitutions):
+        """D35f/D35g/D35h: corrige (ou signale) les points fixes de la liste.
+
+        Pour chaque entrée dont le substitut final == clair (casefold), sonde un
+        substitut non collisionnant (D35i, max 1000 tentatives). Si le sondage
+        échoue, émet un ``UserWarning`` APRÈS le sondage (D35g) et retire
+        l'entrée (dernier recours: le clair reste en place, mais jamais en
+        silence). Les entrées saines sont conservées telles quelles.
+        """
+        out: list[tuple[int, int, str, EntityType]] = []
+        for start, end, substitute, etype in substitutions:
+            clear = text[start:end]
+            if substitute.casefold() != clear.casefold():
+                out.append((start, end, substitute, etype))
+                continue
+            replacement = self._probe_fixed_point_replacement(clear, etype)
+            if replacement is None:
+                warnings.warn(
+                    f"Point fixe permutation: {etype.value} {clear!r} non masqué "
+                    f"(substitut == clair, sondage borné épuisé)",
+                    stacklevel=3,
+                )
+                continue
+            out.append((start, end, replacement, etype))
+        return out
+
+    def _probe_fixed_point_replacement(
+        self, span_value: str, etype: EntityType, max_probes: int = 1000
+    ) -> str | None:
+        """D35i/D35h: sondage borné d'un substitut non collisionnant != clair.
+
+        Pour un type gazetteer, ``cipher.probe(value, k)`` rend le nom à l'index
+        ``perm.encrypt((idx + k) % n)`` (déterministe, bijectif par (idx, k) tant
+        que la colonne n'est pas saturée). Le registre reste le garde-fou:
+        ``register_fpe`` lève ``RegistryError`` si le candidat est déjà attribué
+        à un autre clair (collision -> sondage suivant). Pour un type sans probe
+        (FPE, CP, date, email, plaque, référence), renvoie ``None``: le clair est
+        déjà enregistré par une version cassée, aucune correction possible.
+        """
+        cipher = self._cipher_for(etype)
+        for k in range(1, max_probes + 1):
+            candidate = cipher.probe(span_value, k) if cipher is not None else None
+            if candidate is None:
+                return None
+            if candidate.casefold() == span_value.casefold():
+                continue
+            try:
+                self._registry.register_fpe(
+                    etype.value,
+                    span_value,
+                    surrogate=candidate,
+                    case_pattern=(classify_case(span_value) if etype in _GAZETTEER_TYPES else None),
+                )
+            except RegistryError:
+                continue
+            return candidate
         return None
 
     def _compute_cp_surrogates(self, resolved: list[Span]) -> dict[int, tuple[str | None, int]]:

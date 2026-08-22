@@ -65,6 +65,13 @@ class Gazetteer:
         # d'une phrase candidate ne peut demarrer aucune entree du gazetteer
         # (evite ~8 joins + lookups par token non pertinent).
         self._first_words: frozenset[str] = frozenset(name.split(" ", 1)[0] for name in entries)
+        # Phase 35 — D35e: premiers mots des entrées MULTI-MOTS uniquement.
+        # Permet à la détection des patronymes composés (triggers) de
+        # court-circuiter quand le premier token ne peut démarrer aucune entrée
+        # composée du gazetteer (évite ~3 joins + lookups par token inutile).
+        self._multi_word_first_words: frozenset[str] = frozenset(
+            name.split(" ", 1)[0] for name in entries if " " in name
+        )
 
     def __contains__(self, key: str) -> bool:
         return key.casefold() in self._index
@@ -86,6 +93,17 @@ class Gazetteer:
         premier mot possible, aucune phrase commençant par lui ne peut matcher.
         """
         return self._first_words
+
+    @property
+    def multi_word_first_words(self) -> frozenset[str]:
+        """Set des premiers mots (casefold) des entrees MULTI-MOTS uniquement.
+
+        Préfiltre de préfixe pour la détection des patronymes composés (phase 35,
+        D35e): seules les entrees contenant au moins un espace peuvent produire
+        un span composé; un premier token absent de ce set ne démarre aucune
+        phrase composée du gazetteer.
+        """
+        return self._multi_word_first_words
 
 
 # --- chargement paresseux avec cache en mémoire ---

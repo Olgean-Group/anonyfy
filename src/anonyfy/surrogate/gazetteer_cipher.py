@@ -8,30 +8,26 @@ Nom inconnu du gazetteer -> ``None`` (non masqué, choix (ii) D22: on ne masque
 que ce qu'on sait identifier + réverser; fuite résiduelle documentée, mode
 observation phase 17 pour découvrir ces cas).
 
-Réversibilité: pas de clair stocké. ``decrypt`` retrouve l'index clair via
-la table inverse puis lookup dans le gazetteer trié.
+Réversibilité: pas de clair stocké. ``decrypt`` retrouve l'index clair via la
+table inverse puis lookup dans le gazetteer trié.
 
-Phase 25 (OBJ-REC-110): sondage non-fixe à la construction. Une permutation
-aléatoire a en moyenne un point fixe (perm(idx) == idx); sur un scope dense,
-un ou deux noms sortiraient en clair. Le sondage parcourt la permutation
-entière, identifie les points fixes et les élimine par rotation circulaire de
-leurs images (bijection préservée). Le résultat est un dérangement (permutation
-sans point fixe). Déterminisme préservé: même (scope, type, clair, clé) -> même
-substitut non-fixe.
+Phase 35 (R2, D35a/D35b): permutation paresseuse. La matérialisation
+``forward = [perm.encrypt(i) for i in range(n)]`` (879k chiffrements au
+premier mask, 17-52 s) est supprimée: ``encrypt(name)`` calcule
+``names[perm.encrypt(idx)]`` à la demande (O(1) par nom). Le dérangement
+(``_remove_fixed_points``) est supprimé: les points fixes (~1 par gazetteer)
+réapparaissent et sont traités par le filet de sûreté global dans
+``Engine.mask`` (D35f) — aucune entrée ne ressort identique sans signal.
 
-Risque: pour n=1, un dérangement est impossible (le seul élément est un point
-fixe); le point fixe est conservé (cas dégénéré, non observé en pratique avec
-les gazetteers réels). Pour n >= 2, un dérangement existe toujours.
+``probe`` (D35i): exposé pour le filet. Pour un nom indexé, le probe k rend
+le nom à l'index ``perm.encrypt((idx + k) % n)`` (déterministe, bijectif:
+deux (clair, k) distincts donnent deux (substitut, k) distincts tant que la
+colonne n'est pas saturée). Pour un nom non indexé, renvoie ``None`` (le filet
+avertit, dernier recours D35h).
 
-Cache: le dérangement ne dépend que de (key, scope, entity_type, n), pas des
-noms du gazetteer. Un cache de module évite le recalcul quand plusieurs
-``Vault`` utilisent le même (key, scope).
-
-Phase 27 (OBJ-REC-107): remplacement du dict ``_pos`` par tri + ``bisect``
-(O(log n), zéro dict). Sur 879k noms, le dict ``_pos`` consommait ~220-320 Mo;
-la liste triée ``_cf_names`` + bisect consomme ~30 Mo (les chaînes casefold
-seulement, pas de table de hachage). Le lookup O(log n) reste négligeable
-(~20 comparaisons sur 879k entrées).
+Phase 27 (OBJ-REC-107): tri + ``bisect`` (O(log n), zéro dict). Sur 879k noms,
+le dict ``_pos`` consommait ~220-320 Mo; la liste triée ``_cf_names`` + bisect
+consomme ~30 Mo. Lookup O(log n) ~20 comparaisons.
 """
 
 from __future__ import annotations
@@ -41,46 +37,9 @@ import bisect
 from anonyfy.detect.gazetteers.loader import Gazetteer
 from anonyfy.surrogate.permutation import Permutation
 
-# Cache de module: (key, scope, entity_type, n) -> (forward, inverse).
-# Le dérangement ne dépend que de la permutation (key/scope/type/n), pas des
-# noms du gazetteer. Évite le recalcul quand plusieurs Vault utilisent le même
-# (key, scope).
-_DERANGEMENT_CACHE: dict[tuple[bytes, str, str, int], tuple[list[int], list[int]]] = {}
-
-
-def _remove_fixed_points(table: list[int], n: int) -> None:
-    """Élimine les points fixes de la table de permutation (en place).
-
-    Phase 25, sondage non-fixe. Stratégie bijective:
-    - >= 2 points fixes: rotation circulaire de leurs images. Chaque point
-      fixe ``f`` reçoit l'image du point fixe suivant. Aucun nouveau point
-      fixe (tous les points fixes sont distincts).
-    - 1 point fixe (n >= 2): échange avec le voisin ``(f+1) mod n``, qui n'est
-      pas un point fixe (bijection préservée, aucun nouveau point fixe).
-    - 1 point fixe (n == 1): dérangement impossible, conservé (cas dégénéré).
-    - 0 point fixe: déjà un dérangement, rien à faire.
-
-    Bijection: la rotation et l'échange sont des transpositions de valeurs
-    dans la table; l'ensemble des valeurs est inchangé, la bijectivité est
-    préservée.
-    """
-    fixed = [i for i in range(n) if table[i] == i]
-    if len(fixed) >= 2:
-        # Rotation circulaire: fixed[k] -> fixed[(k+1) % len(fixed)].
-        # Les images actuelles des points fixes sont eux-mêmes (table[f] == f).
-        # Après rotation, chaque point fixe reçoit l'image du suivant.
-        for k, f in enumerate(fixed):
-            table[f] = fixed[(k + 1) % len(fixed)]
-    elif len(fixed) == 1 and n >= 2:
-        # Échange avec le voisin (non point fixe, car len(fixed) == 1).
-        f = fixed[0]
-        j = (f + 1) % n
-        table[f], table[j] = table[j], table[f]
-    # else: 0 fixe (déjà dérangement) ou n == 1 (impossible à déranger).
-
 
 class GazetteerCipher:
-    """Permutation keyée sur l'index canonique d'un gazetteer (dérangement).
+    """Permutation keyée paresseuse sur l'index canonique d'un gazetteer.
 
     Args:
         key: clé secrète.
@@ -92,28 +51,9 @@ class GazetteerCipher:
     def __init__(self, key: bytes, scope: str, entity_type: str, gazetteer: Gazetteer) -> None:
         # Liste ordonnée canonique: noms triés par casefold (stable, figé D5).
         self._names = sorted((e.name for e in gazetteer), key=str.casefold)
-        # Phase 27 OBJ-REC-107: remplace le dict _pos par une liste triée de
-        # casefold + bisect (O(log n), zéro dict). Évite ~220-320 Mo de RAM
-        # sur 879k noms (dict hash table) -> ~30 Mo (liste de chaînes seule).
         self._cf_names = [n.casefold() for n in self._names]
         n = len(self._names)
-
-        # Dérangement (phase 25): permutation sans point fixe. Le dérangement
-        # ne dépend que de (key, scope, entity_type, n); on le cache pour éviter
-        # le recalcul quand plusieurs Vault partagent le même (key, scope).
-        cache_key = (bytes(key), scope, entity_type, n)
-        cached = _DERANGEMENT_CACHE.get(cache_key)
-        if cached is None:
-            perm = Permutation(key=key, scope=scope, entity_type=entity_type, n=n)
-            forward = [perm.encrypt(i) for i in range(n)]
-            _remove_fixed_points(forward, n)
-            inverse = [0] * n
-            for i, v in enumerate(forward):
-                inverse[v] = i
-            _DERANGEMENT_CACHE[cache_key] = (forward, inverse)
-            cached = (forward, inverse)
-        self._forward = cached[0]
-        self._inverse = cached[1]
+        self._perm = Permutation(key=key, scope=scope, entity_type=entity_type, n=n)
 
     def _index_of(self, cf: str) -> int:
         """Index de ``cf`` dans la liste triée via bisect (O(log n)), ou -1."""
@@ -125,20 +65,42 @@ class GazetteerCipher:
     def encrypt(self, name: str) -> str | None:
         """Retourne un substitut plausible du gazetteer, ou None si nom inconnu.
 
-        Phase 25: le substitut est garanti différent du clair (dérangement,
-        aucun point fixe) pour n >= 2.
+        Phase 35: calcul paresseux ``names[perm.encrypt(idx)]`` (O(1) par nom,
+        plus de matérialisation de la permutation entière). Le substitut peut
+        être un point fixe (== clair, ~1 par gazetteer); le filet global
+        (D35f) s'en charge dans ``Engine.mask``.
         """
         idx = self._index_of(name.casefold())
         if idx < 0:
             return None
-        return self._names[self._forward[idx]]
+        return self._names[self._perm.encrypt(idx)]
 
     def decrypt(self, substitute: str) -> str | None:
-        """Retourne le nom clair, ou None si le substitut n'est pas du gazetteer."""
+        """Retourne le nom clair, ou None si le substitut n'est pas du gazetteer.
+
+        La permutation est bijective: ``encrypt`` et ``decrypt`` sont des
+        inverses (pas besoin de table inverse matérialisée).
+        """
         sub_idx = self._index_of(substitute.casefold())
         if sub_idx < 0:
             return None
-        return self._names[self._inverse[sub_idx]]
+        return self._names[self._perm.decrypt(sub_idx)]
+
+    def probe(self, name: str, probe: int = 1) -> str | None:
+        """Substitut du nom avec un décalage déterministe (D35i, filet D35f).
+
+        Pour un nom indexé ``idx``, renvoie le nom à l'index
+        ``perm.encrypt((idx + probe) % n)`` (distinct de ``encrypt(name)`` si
+        ``probe != 0``). Pour un nom non indexé, renvoie ``None``. Le probe
+        reste déterministe (même clair -> même substitut de probe, invariant 2)
+        et injectif par (idx, probe) : un vrai sondage borné (max 1000, D35h)
+        permet de sortir d'un point fixe sans casser la bijectivité scopée.
+        """
+        idx = self._index_of(name.casefold())
+        if idx < 0:
+            return None
+        n = len(self._names)
+        return self._names[self._perm.encrypt((idx + probe) % n)]
 
 
 __all__ = ["GazetteerCipher"]

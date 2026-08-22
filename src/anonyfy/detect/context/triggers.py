@@ -182,6 +182,87 @@ _WINDOW = 40
 # (Jean-Marc, O'Brien). Frontières par exclusion des caractères non lettres.
 _TOKEN_RE = re.compile(r"[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]*")
 
+#: Nombre maximum de tokens d'un patronyme composé (phase 35, D35e). Les
+#: entrées multi-mots du gazetteer noms (220 200) vont jusqu'à ~8 mots; borné à
+#: 3 pour la détection des composés courants (recette S1: 2 mots) sans explosion
+#: combinatoire ni faux positifs sur les phrases nominales.
+_MAX_COMPOSITE_WORDS = 3
+
+
+def _detect_composite_patronymes(
+    tokens: list[tuple[int, int, str]],
+    cfold_tokens: list[str],
+    noms,
+    trig_starts: list[int],
+    trig_max_te: list[int],
+    window: int,
+) -> list[Span]:
+    """Phase 35 — D35e: patronymes composés (2-3 mots) du gazetteer noms.
+
+    Une entrée multi-mots du gazetteer (ex. « ALTOUBAH MIANGOGO ») dont chaque
+    token seul est absent du gazetteer n'était pas masquée (fuite S1): aucun
+    span simple n'était émis, ``GazetteerCipher.encrypt`` renvoyait ``None`` et
+    le texte ressortait inchangé. Ce détecteur émet un span composé UNIQUE
+    couvrant les mots (l'entrée composée EST dans le gazetteer, donc masquable
+    par le cipher). Modèle: ``places._phrase_matches`` (plus longue phrase,
+    prefiltre ``multi_word_first_words``).
+
+    Confiance: ``_BOOSTED`` si un déclencheur est proche, ``_BASE`` sinon. Les
+    composés nus restent filtrés par le candidat nu en permissive (phase 34,
+    D34b: pas de régression). Renvoie la liste brute (l'arbitrage des
+    chevauchements avec les spans simples est du ressort de ``resolve_overlaps``).
+    """
+    spans: list[Span] = []
+    i = 0
+    while i < len(tokens):
+        # Un premier token chevauchant un déclencheur (ex. « M » dans « M. »)
+        # est la partie lettrée du déclencheur, pas le début d'un patronyme
+        # composé. Sans ce garde, l'abréviation « M. » deviendrait le premier
+        # token d'entrées réelles du gazette commençant par « M » (ex. « M
+        # AATALLA ») et le déclencheur serait absorbé dans le span composé.
+        if _overlaps_trigger(tokens[i][0], tokens[i][1], trig_starts, trig_max_te):
+            i += 1
+            continue
+        first_key = cfold_tokens[i]
+        if first_key in noms.multi_word_first_words and i + 1 < len(tokens):
+            best: tuple[int, int, str] | None = None
+            cfold_words: list[str] = []
+            words: list[str] = []
+            for k in range(i, min(i + _MAX_COMPOSITE_WORDS, len(tokens))):
+                words.append(tokens[k][2])
+                cfold_words.append(cfold_tokens[k])
+                # k > i: un composé couvre AU MOINS 2 tokens. Sans ce garde-fou,
+                # un premier mot seul dans le gazette (ex. « M », initiale dans
+                # load_noms) serait émis comme composé et substitué.
+                if k > i and " ".join(cfold_words) in noms:
+                    best = (tokens[i][0], tokens[k][1], " ".join(words))
+            if best is not None:
+                start, end, value = best
+                near = _near_trigger(start, end, trig_starts, trig_max_te, window)
+                spans.append(
+                    Span(
+                        start=start,
+                        end=end,
+                        type=EntityType.PATRONYME,
+                        value=value,
+                        rule_id="gazetteer-nom",
+                        confidence=_BOOSTED if near else _BASE,
+                    )
+                )
+                # Ne pas re-matcher les tokens couverts par le composé.
+                i = _token_index_after(tokens, end)
+                continue
+        i += 1
+    return spans
+
+
+def _token_index_after(tokens: list[tuple[int, int, str]], pos: int) -> int:
+    """Indice du premier token dont le début est >= ``pos`` (recherche linéaire)."""
+    for idx, (s, _e, _v) in enumerate(tokens):
+        if s >= pos:
+            return idx
+    return len(tokens)
+
 
 def _find_trigger_spans(text: str, triggers: tuple[str, ...]) -> list[tuple[int, int]]:
     """Positions (start, end) de chaque occurrence de déclencheur dans ``text``."""
@@ -280,11 +361,14 @@ def apply(
     trigger_spans = _find_trigger_spans(text, triggers)
     trig_starts, _trig_ends, trig_max_te = _prepare_triggers(trigger_spans)
 
+    tokens: list[tuple[int, int, str]] = [
+        (m.start(), m.end(), m.group(0)) for m in _TOKEN_RE.finditer(text)
+    ]
+    cfold_tokens = [v.casefold() for (_, _, v) in tokens]
+
     spans: list[Span] = []
-    for m in _TOKEN_RE.finditer(text):
-        value = m.group(0)
+    for tok_start, tok_end, value in tokens:
         key = value.casefold()
-        tok_start, tok_end = m.start(), m.end()
         # Un token chevauchant un déclencheur (ex. « M » dans « M. ») est la
         # partie lettrée du déclencheur lui-même, pas un candidat nom.
         if _overlaps_trigger(tok_start, tok_end, trig_starts, trig_max_te):
@@ -330,4 +414,12 @@ def apply(
                     confidence=_CAPTURED,
                 )
             )
+
+    # Phase 35 — D35e: patronymes composés (2-3 mots) du gazetteer noms. Les
+    # spans simples ci-dessus couvrent les tokens individuels; le span composé
+    # (plus long, même confiance) gagne l'arbitrage ``resolve_overlaps`` et est
+    # masqué en bloc par le cipher (l'entrée composée est dans le gazetteer).
+    spans.extend(
+        _detect_composite_patronymes(tokens, cfold_tokens, noms, trig_starts, trig_max_te, window)
+    )
     return spans
