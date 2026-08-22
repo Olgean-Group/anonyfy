@@ -1,4 +1,9 @@
-## Non publié
+## 0.1.1 (2026-08-22)
+
+Correctifs recette v0.1.0 : séparateurs SIRET/SIREN (B1), points fixes
+détecteur (S1), round-trip vault (B2), gazetteers INSEE complets (S2), typage
+patronyme (S3), code postal/commune (S4), exclusion data/raw (M3), performance
+mask() (M4) et description PyPI (M5).
 
 ### Phase 32 — M4: Performance mask()
 
