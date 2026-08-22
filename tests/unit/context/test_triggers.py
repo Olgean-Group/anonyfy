@@ -162,9 +162,29 @@ class TestExcludedNomsR1:
 
     def test_excluded_noms_contient_la_liste_minimale(self):
         for mot in (
-            "le", "la", "les", "il", "elle", "nous", "vous", "cette", "ce",
-            "ces", "des", "pour", "sur", "dans", "par", "avec", "sans",
-            "nir", "siret", "siren", "iban", "tva", "rib",
+            "le",
+            "la",
+            "les",
+            "il",
+            "elle",
+            "nous",
+            "vous",
+            "cette",
+            "ce",
+            "ces",
+            "des",
+            "pour",
+            "sur",
+            "dans",
+            "par",
+            "avec",
+            "sans",
+            "nir",
+            "siret",
+            "siren",
+            "iban",
+            "tva",
+            "rib",
         ):
             assert mot in EXCLUDED_NOMS, f"mots-outil/acronyme manquant: {mot!r}"
 
@@ -198,9 +218,7 @@ class TestCandidatNuR1:
 
     @pytest.fixture
     def vault(self, tmp_path):
-        v = Vault(
-            key=b"0" * 16, scope="s", registry_path=str(tmp_path / "reg.db")
-        )
+        v = Vault(key=b"0" * 16, scope="s", registry_path=str(tmp_path / "reg.db"))
         yield v
         v.close()
 

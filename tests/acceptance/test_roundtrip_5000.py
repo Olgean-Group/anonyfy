@@ -14,7 +14,6 @@ from __future__ import annotations
 import pytest
 
 from anonyfy import Vault
-from anonyfy.detect.gazetteers.loader import load_noms
 from anonyfy.types import EntityType
 
 _KEY = b"0" * 16
@@ -35,9 +34,7 @@ def noms() -> list[str]:
     from anonyfy.detect.gazetteers.loader import load_noms
 
     all_noms = [
-        e.name
-        for e in load_noms()
-        if " " not in e.name and "'" not in e.name and "-" not in e.name
+        e.name for e in load_noms() if " " not in e.name and "'" not in e.name and "-" not in e.name
     ][:_COUNT]
     assert len(all_noms) == _COUNT, "gazetteer n'a pas assez de patronymes mono-token"
     return all_noms

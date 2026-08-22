@@ -30,6 +30,7 @@ import pytest
 from anonyfy import Vault
 from anonyfy.detect.context.triggers import EXCLUDED_NOMS
 from anonyfy.types import EntityType
+from anonyfy.vault import UnresolvedSpanError
 
 _KEY = b"0" * 16
 _SCOPE = "acceptance-no-false-positive"
@@ -115,10 +116,8 @@ class TestCorpusSansFalsePositive:
 
     def test_prenom_nu_leve_en_strict(self, strict_vault) -> None:
         """Critère 6 : en strict, un prénom nu sans déclencheur lève."""
-        with pytest.raises(Exception):
+        with pytest.raises(UnresolvedSpanError):
             strict_vault.mask("Paul est arrivé hier.")
-        # NB: la classe précise UnresolvedSpanError est vérifiée dans
-        # tests/unit/context/test_triggers.py (contexte unitaire).
 
 
 class TestExcludedNoms:
@@ -126,9 +125,7 @@ class TestExcludedNoms:
     global PATRONYME — un token dont le casefold est dans la liste n'est JAMAIS
     émis comme PATRONYME, même avec un déclencheur proche."""
 
-    @pytest.mark.parametrize(
-        "mot", sorted(EXCLUDED_NOMS), ids=lambda m: f"exclu-{m}"
-    )
+    @pytest.mark.parametrize("mot", sorted(EXCLUDED_NOMS), ids=lambda m: f"exclu-{m}")
     def test_mot_outil_jamais_emission_patronyme(self, vault, mot: str) -> None:
         # Avec déclencheur « M. » : le token serait sinon PATRONYM (gazetteer-nom
         # boosté à 0.9 s'il est dans le gazetteer noms, ou context-capture à 0.8
@@ -170,8 +167,7 @@ class TestExcludedNoms:
         m = vault.mask("M. SIRET 73282932000033")
         assert "SIRET" in m.text, f"SIRET masqué en contexte déclenché: {m.text!r}"
         assert not any(
-            s.type == EntityType.PATRONYME and s.value.casefold() == "siret"
-            for s in m.entities
+            s.type == EntityType.PATRONYME and s.value.casefold() == "siret" for s in m.entities
         )
 
     def test_siret_seul_non_masque_comme_patronyme(self, vault) -> None:

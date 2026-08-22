@@ -111,9 +111,7 @@ _FPE_RUN_DETECTORS: tuple[tuple[EntityType, object, str], ...] = (
 # Les spans déclenchés (confidence >= 0.8, dont context-capture à 0.8) ne sont
 # pas filtrés par ce critère (D34c/D34e) — ils restent soumis au filtre global
 # EXCLUDED_NOMS appliqué en amont (triggers.apply).
-_BARE_RULES: frozenset[str] = frozenset(
-    {"gazetteer-nom", "gazetteer-prenom", "context-capture"}
-)
+_BARE_RULES: frozenset[str] = frozenset({"gazetteer-nom", "gazetteer-prenom", "context-capture"})
 # Même seuil que vault.WEAK_CONFIDENCE_THRESHOLD (0.8) — défini localement pour
 # éviter un import circulaire engine -> vault.
 _BARE_CONFIDENCE_THRESHOLD: float = 0.8

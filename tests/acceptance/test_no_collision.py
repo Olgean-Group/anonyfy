@@ -14,6 +14,7 @@ from anonyfy import Vault
 
 _KEY = b"0" * 16
 
+
 #: Noms mono-token (ni espace, ni apostrophe, ni tiret): les seuls qu'un
 #: déclencheur "M. " encapsule en un seul span PATRONYME masqué. Les entrées
 #: composées ("BEVEN BUNFORD") n'ont pas de token unique dans le gazetteer et
@@ -22,9 +23,7 @@ def _patronymes_mono_token(count=5000):
     from anonyfy.detect.gazetteers.loader import load_noms
 
     return [
-        e.name
-        for e in load_noms()
-        if " " not in e.name and "'" not in e.name and "-" not in e.name
+        e.name for e in load_noms() if " " not in e.name and "'" not in e.name and "-" not in e.name
     ][:count]
 
 
