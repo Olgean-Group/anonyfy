@@ -11,6 +11,6 @@ avec registre de scope et intégration Aho-Corasick.
 
 from anonyfy.vault import Vault
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 __all__ = ["Vault", "__version__"]

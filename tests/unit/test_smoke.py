@@ -10,4 +10,4 @@ import anonyfy
 
 
 def test_smoke_imports_anonyfy() -> None:
-    assert anonyfy.__version__ == "0.1.0"
+    assert anonyfy.__version__ == "0.1.2"
