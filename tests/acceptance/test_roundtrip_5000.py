@@ -24,9 +24,22 @@ _COUNT = 5000
 
 @pytest.fixture(scope="module")
 def noms() -> list[str]:
-    """5 000 patronymes distincts du gazetteer (forme majuscule SIRENE)."""
-    all_noms = [e.name for e in list(load_noms())[:_COUNT]]
-    assert len(all_noms) == _COUNT, "gazetteer n'a pas assez de patronymes"
+    """5 000 patronymes distincts du gazetteer (forme majuscule SIRENE).
+
+    Phase 34 (R1, D34b): seuls les patronymes MONO-token (ni espace, ni
+    apostrophe, ni tiret) sont réellement masqués par un déclencheur "M. " —
+    les entrées composées ("BEVEN BUNFORD") n'ont pas de token unique dans le
+    gazetteer et ne seraient pas masquées, vidant le test de sa substance. Le
+    round-trip est exercé sur des patronymes mono-token masqués en contexte.
+    """
+    from anonyfy.detect.gazetteers.loader import load_noms
+
+    all_noms = [
+        e.name
+        for e in load_noms()
+        if " " not in e.name and "'" not in e.name and "-" not in e.name
+    ][:_COUNT]
+    assert len(all_noms) == _COUNT, "gazetteer n'a pas assez de patronymes mono-token"
     return all_noms
 
 
@@ -43,20 +56,34 @@ class TestRoundTrip5000:
     """unmask(mask(x)) == x sur 5 000 patronymes dans un scope unique."""
 
     def test_5000_patronymes_roundtrip(self, vault, noms):
-        """Round-trip exact pour chacun des 5 000 patronymes.
+        """Round-trip exact pour les 5 000 patronymes.
 
         Le registre accumule tous les substituts; l'Aho-Corasick doit arbitrer
         les hits chevauchants (un substitut préfixe d'un autre) par longueur
         décroissante avant la substitution droite-à-gauche.
 
-        Les 5 000 textes masqués sont concaténés (un par ligne) et démasqués en
-        un seul appel ``unmask`` (une construction Aho-Corasick avec les 5 000
-        substituts du registre). Le résultat est comparé ligne par ligne au
-        clair attendu. Cela équivaut à 5 000 round-trips individuels tout en
-        restant praticable (une construction d'automate au lieu de 5 000).
+        Phase 34 (R1, D34b): un nom nu n'est plus masqué en permissive, donc
+        chaque patronyme est masqué dans un contexte déclencheur ``M. `` et le
+        substitut réel est extrait (partie après ``M. ``). C'est ce substitut —
+        comme l'ancien test où ``mask(nom)`` renvoyait directement le substitut
+        — qui est démasqué. On ne passe pas ``"M. <subst>"`` au ``unmask`` : le
+        préfixe ``M. `` y créerait une ambiguïté légitime (les substituts
+        multi-tokens du registre ont une variante ``M. <dernier token>``,
+        variants.py ``_monsieur_variant``), donc le round-trip porte sur le
+        substitut nu, comme dans le contrat d'origine.
+
+        Les 5 000 substituts sont concaténés (un par ligne) et démasqués en un
+        seul appel ``unmask`` (une construction Aho-Corasick avec les 5 000
+        substituts du registre). Le résultat est comparé ligne par ligne au clair
+        attendu. Cela équivaut à 5 000 round-trips individuels tout en restant
+        praticable (une construction d'automate au lieu de 5 000).
         """
-        # Masker les 5 000 noms (le registre accumule les substituts).
-        masked_lines = [vault.mask(nom).text for nom in noms]
+        # Masker les 5 000 noms en contexte déclencheur (registre peuplé) et
+        # extraire le substitut réel (partie après "M. ").
+        masked_lines = [vault.mask(f"M. {nom}").text.removeprefix("M. ").strip() for nom in noms]
+        assert all(sub != nom for nom, sub in zip(noms, masked_lines, strict=True)), (
+            "au moins un patronyme n'a pas été masqué (round-trip trivial)"
+        )
         # Concaténer (séparateur "\n" non touché par unmask) et démasquer en
         # un seul appel.
         big_masked = "\n".join(masked_lines)
@@ -80,12 +107,17 @@ class TestRoundTrip5000:
         sans séparateur et on vérifie que ``unmask`` retrouve les deux clairs
         collés. L'arbitrage par longueur décroissante (OBJ-REC-106) garantit que
         le hit le plus long gagne les overlaps.
+
+        Phase 34 (R1, D34b): le masquage passe par un déclencheur ``M. `` (un
+        nom nu n'est plus masqué en permissive); on extrait le substitut réel
+        (partie après ``M. ``) avant de le coller.
         """
         a, b = noms[0], noms[1]
-        ma = vault.mask(a)
-        mb = vault.mask(b)
-        sub_a = ma.text
-        sub_b = mb.text
+        ma = vault.mask(f"M. {a}")
+        mb = vault.mask(f"M. {b}")
+        sub_a = ma.text.removeprefix("M. ").strip()
+        sub_b = mb.text.removeprefix("M. ").strip()
+        assert sub_a != a and sub_b != b, "patronyme non masqué en contexte déclenché"
         # Coller les substituts sans séparateur (réponse LLM sans espacement).
         colles = sub_a + sub_b
         rt = vault.unmask(colles)

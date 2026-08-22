@@ -91,13 +91,17 @@ class TestCritere6MonsieurLeroy:
 
     def test_monsieur_leroy(self, vault):
         t = "Marc Leroy"
-        m = vault.mask(t)
+        # Phase 34 (D34b/D34e) : sans déclencheur, le patronyme nu n'est plus
+        # masqué en permissive. On masque donc via un contexte déclenché
+        # ("M.") pour conserver le contrat D7 testé ici (mock reformate,
+        # unmask restitue l'original).
+        m = vault.mask(f"M. {t}")
         # Le substitut patronyme est dans m.text (pas le clair)
         assert "Marc" not in m.text
         assert "Leroy" not in m.text
         # Mock de modèle: reformate en "M. <substitut_nom>"
         # m.text contient le substitut (un autre patronyme du gazetteer)
-        sub_nom = m.text.strip()  # m.text == substitut_nom
+        sub_nom = m.text.removeprefix("M. ").strip()  # m.text == "M. <subst>"
         reformate = f"M. {sub_nom}"
         # unmask restitue le texte clair original
         result = vault.unmask(reformate)
