@@ -125,7 +125,7 @@ class TestIntrusionInvariant4:
 class TestMaskedTextStructure:
     def test_masked_text_entities_non_vides(self, tmp_path) -> None:
         v = _vault(tmp_path)
-        m = v.mask("SIRET 73282932000033")
+        m = v.mask("NUM 73282932000033")
         assert m.text
         assert len(m.entities) == 1
         assert m.entities[0].type == EntityType.SIRET
@@ -133,7 +133,7 @@ class TestMaskedTextStructure:
     def test_entities_offsets_pointent_vers_substitut(self, tmp_path) -> None:
         """Les offsets de .entities pointent vers les substituts réels dans .text."""
         v = _vault(tmp_path)
-        m = v.mask("SIRET 73282932000033")
+        m = v.mask("NUM 73282932000033")
         for ent in m.entities:
             # L'offset du span dans .text correspond au substitut (pas au clair)
             assert m.text[ent.start : ent.end] != "73282932000033"

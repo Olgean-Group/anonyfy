@@ -15,7 +15,6 @@ import pytest
 
 from anonyfy import Vault
 from anonyfy.detect.gazetteers.loader import load_noms
-from anonyfy.surrogate.case_pattern import apply_case
 from anonyfy.types import EntityType
 
 _KEY = b"0" * 16
@@ -92,67 +91,51 @@ class TestRoundTrip5000:
         rt = vault.unmask(colles)
         assert rt == a + b, f"substituts collés {colles!r} -> unmasked {rt!r}, attendu {a + b!r}"
 
-    def test_arbitrage_match_exact_vs_variante(self, vault, noms):
+    def test_arbitrage_match_exact_vs_variante(self, tmp_path_factory):
         """B2b: un match exact gagne sur une variante de casse de même longueur.
 
-        Inscrit au registre deux substituts de casses différentes (ex. un
-        patronyme ``BONY`` majuscule et une commune ``Bony`` Title Case)
-        produisant le même pattern Aho-Corasick via les variantes de casse
-        (``BONY`` upper de ``Bony``). L'Aho-Corasick émet deux hits pour le span
-        ``BONY``: un match exact (``BONY``) et une variante (``Bony``). Le
-        tiebreak ``is_exact`` (match == substitut) départage: le match exact
+        Phase 27 OBJ-REC-108: test déterministe par collision synthétique. On
+        inscrit directement deux substituts de casses différentes (``BONY``
+        PATRONYME majuscule et ``Bony`` COMMUNE Title Case) via ``register_fpe``.
+        L'Aho-Corasick émet deux hits pour le span ``BONY``: un match exact
+        (``BONY``) et une variante (``Bony`` dont la variante upper = ``BONY``).
+        Le tiebreak ``is_exact`` (match == substitut) départage: le match exact
         gagne. Retirer ``is_exact`` du tri fait échouer ce test (la variante
         ``Bony`` gagne par ordre stable et restitue le mauvais clair).
-
-        On parcourt toutes les collisions de variante du registre et on vérifie
-        que le unmask de chaque substitut exact restitue son clair (pas le clair
-        de la variante). Sans ``is_exact``, les collisions où la variante est
-        insérée avant le match exact dans l'Aho-Corasick (ex. ``Bony`` COMMUNE
-        enregistrée avant ``BONY`` PATRONYME) produisent un hit variante qui
-        gagne l'arbitrage par ordre stable.
         """
-        # S'assurer que le registre contient les 5 000 substituts (le fixture
-        # module partage le Vault avec test_5000_patronymes_roundtrip qui masque
-        # les 5 000 noms en premier; on masque aussi par sécurité).
-        surrogate_set = set(vault._registry.iter_surrogates())
-        if len(surrogate_set) < 1000:
-            for nom in noms:
-                vault.mask(nom)
-            surrogate_set = set(vault._registry.iter_surrogates())
 
-        # Trouver toutes les collisions: un substitut majuscule ``sub`` dont la
-        # forme Title Case ``sub.title()`` est aussi un substitut d'un type
-        # différent (ex. ``BONY`` PATRONYME vs ``Bony`` COMMUNE).
-        collisions: list[tuple[str, str]] = []
-        for sub in sorted(surrogate_set):
-            title_form = sub.title()
-            if title_form == sub or title_form not in surrogate_set:
-                continue
-            rec_sub = vault._registry.lookup(sub)
-            rec_title = vault._registry.lookup(title_form)
-            if rec_sub is None or rec_title is None:
-                continue
-            if rec_sub.entity_type == rec_title.entity_type:
-                continue
-            collisions.append((sub, title_form))
-        assert collisions, "aucune collision de variante trouvée dans le registre"
+        from anonyfy.surrogate.case_pattern import apply_case as _apply_case
 
-        # Pour chaque collision, le unmask du substitut exact doit restituer
-        # le clair de sub (pas le clair de title_form, la variante).
-        failures: list[str] = []
-        for sub, title_form in collisions:
-            rec_sub = vault._registry.lookup(sub)
-            etype = EntityType.coerce(rec_sub.entity_type)
-            expected = vault._engine.decrypt_surrogate(etype, sub)
-            if rec_sub.case_pattern is not None:
-                expected = apply_case(expected, rec_sub.case_pattern)
-            rt = vault.unmask(sub)
-            if rt != expected:
-                failures.append(
-                    f"{sub!r} ({rec_sub.entity_type}) -> unmask {rt!r}, "
-                    f"attendu {expected!r} (variante {title_form!r} a gagné)"
-                )
-        assert not failures, (
-            f"{len(failures)} collision(s) de variante échouée(s) sur "
-            f"{len(collisions)}:\n" + "\n".join(failures)
-        )
+        d = tmp_path_factory.mktemp("arbiter-exact")
+        v = Vault(key=_KEY, scope=_SCOPE, registry_path=str(d / "arb.db"))
+        try:
+            # Forcer l'initialisation paresseuse des ciphers patronyme/commune
+            # pour pouvoir décrypter les substituts synthétiques.
+            clear_patronyme = v._engine.decrypt_surrogate(EntityType.PATRONYME, "BONY")
+            clear_commune = v._engine.decrypt_surrogate(EntityType.COMMUNE, "Bony")
+            assert clear_patronyme is not None, "BONY pas dans le gazetteer noms"
+            assert clear_commune is not None, "Bony pas dans le gazetteer communes"
+            assert clear_patronyme != clear_commune, (
+                "BONY et Bony doivent décrypter vers des clairs distincts"
+            )
+
+            # Inscrire la collision SYNTHÉTIQUE: BONY (PATRONYME, U:U) et
+            # Bony (COMMUNE, T:T). Le registre ne peut pas refuser: les substituts
+            # sont des chaînes distinctes (cas différent).
+            v._registry.register_fpe(
+                "patronyme", clear_patronyme, surrogate="BONY", case_pattern="U:U"
+            )
+            v._registry.register_fpe("commune", clear_commune, surrogate="Bony", case_pattern="T:T")
+
+            # Le unmask de « BONY » doit restituer le clair PATRONYME (match
+            # exact), pas le clair COMMUNE (variante de casse). Sans is_exact,
+            # la variante « Bony » (inscrite en second) gagne par ordre stable
+            # et restitue le clair COMMUNE.
+            expected = _apply_case(clear_patronyme, "U:U")
+            rt = v.unmask("BONY")
+            assert rt == expected, (
+                f"unmask('BONY') = {rt!r}, attendu {expected!r} (clair PATRONYME). "
+                f"La variante Bony/COMMUNE a vraisemblablement gagné l'arbitrage."
+            )
+        finally:
+            v.close()

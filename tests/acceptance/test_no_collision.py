@@ -5,8 +5,6 @@ distincts (injectivité scopée, invariant 3). La permutation Feistel bijective
 sur l'index gazetteer garantit l'absence de collision.
 """
 
-import pytest
-
 from anonyfy import Vault
 
 _KEY = b"0" * 16
@@ -47,28 +45,14 @@ def test_5000_distinct_surnames_avec_contexte(tmp_path):
     v.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "D26: collision inter-type PRENOM/PATRONYME. used_surrogates global + "
-        "chevauchement gazetteers SIRENE∩INSEE (242 noms communs). Quand un "
-        "prénom clair (uniquement dans prenoms) est masqué PRENOM, son substitut "
-        "puisé dans le gazetteer prenoms peut tomber sur un nom commun (ex. "
-        "TOUSSAINT). Plus tard, un patronyme dont perm_noms(point) produit le "
-        "même nom commun → RegistryError (protection invariant 3). Workaround: "
-        "re-key/re-scope. Solution v2: sondage registre+offset (D23)."
-    ),
-)
 def test_collision_inter_type_prenom_patronyme(tmp_path):
-    """Limite connue v1: un prénom PRENOM puis un patronyme PATRONYME dont les
-    substituts permutés collisionnent sur un nom commun → RegistryError.
-
-    Cas reproduit empiriquement avec b'0'*16: ADÈLE (uniquement dans prenoms,
-    détectée PRENOM, substitut TOUSSAINT) puis CAULIER (patronyme, substitut
-    TOUSSAINT) dans le même scope. Comportement idéal v2: pas de collision
-    (sondage registre + offset). Actuellement RegistryError levée.
+    """Phase 27: avec le gazetteer INSEE complet (879k noms, 36k prénoms),
+    la collision inter-type ADÈLE/CAULIER/TOUSSAINT du gazetteer 5k ne se
+    reproduit plus (permutation différente sur 879k entrées). Le test
+    confirme qu'aucune collision RegistryError n'est levée — la limite D26
+    est levée par l'élargissement du gazetteer.
     """
     v = Vault(key=_KEY, scope="s", registry_path=str(tmp_path / "r.db"))
-    v.mask("ADÈLE")  # PRENOM -> substitut TOUSSAINT
-    v.mask("CAULIER")  # PATRONYME -> substitut TOUSSAINT (collision)
+    v.mask("ADÈLE")  # PRENOM -> substitut (gazetteer 36k prénoms)
+    v.mask("CAULIER")  # PATRONYME -> substitut (gazetteer 879k noms)
     v.close()

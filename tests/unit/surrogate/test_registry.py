@@ -16,6 +16,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -418,3 +419,97 @@ class TestCasLimites:
     def test_reserve_gazetteer_size_non_positif_rejeté(self, registry: ScopeRegistry):
         with pytest.raises(ValueError):
             registry.reserve("prenom", "Jean", gazetteer_size=0)
+
+
+# --- OBJ-REC-103: check_gazetteer_version câblé au registre ------------------
+
+
+class TestGazetteerVersionMismatch:
+    """Phase 27 OBJ-REC-103: le registre persiste l'empreinte gazetteer en meta
+    et lève GazetteerVersionMismatch à l'ouverture si l'empreinte stockée diffère
+    de l'empreinte embarquée courante (garantie D5).
+
+    Scénario: registre créé avec gazetteer version A → gazetteer mis à jour vers
+    version B → réouverture → exception (les indices décalés cassent la
+    réversibilité).
+    """
+
+    def test_gazetteer_version_mismatch_à_la_rouverture(self, registry_path: str):
+        """Créer registre version A, changer l'empreinte stockée, rouvrir → exception."""
+        from anonyfy.detect.gazetteers.loader import GazetteerVersionMismatch
+
+        # 1. Créer le registre: persiste l'empreinte courante en meta.
+        r = ScopeRegistry(key=ZERO_KEY, scope=SCOPE, registry_path=registry_path)
+        r.close()
+
+        # 2. Simuler une mise à jour du gazetteer: écraser l'empreinte stockée
+        # par une empreinte différente (version A → version B).
+        con = sqlite3.connect(registry_path)
+        try:
+            con.execute(
+                "UPDATE meta SET gazetteer_version=?",
+                ("empreinte_version_A_différente_du_tout",),
+            )
+            con.commit()
+        finally:
+            con.close()
+
+        # 3. Rouvrir: l'empreinte stockée != empreinte embarquée → exception.
+        with pytest.raises(GazetteerVersionMismatch):
+            ScopeRegistry(key=ZERO_KEY, scope=SCOPE, registry_path=registry_path)
+
+    def test_gazetteer_version_concordante_pas_dexception(self, registry_path: str):
+        """Rouvrir un registre avec la même empreinte → pas d'exception."""
+        r = ScopeRegistry(key=ZERO_KEY, scope=SCOPE, registry_path=registry_path)
+        r.reserve("prenom", "Jean", gazetteer_size=50000)
+        r.close()
+        # Rouverture: l'empreinte n'a pas changé -> pas d'exception.
+        r2 = ScopeRegistry(key=ZERO_KEY, scope=SCOPE, registry_path=registry_path)
+        r2.close()
+
+    def test_gazetteer_version_persistée_en_meta(self, registry_path: str):
+        """L'empreinte gazetteer est bien persistée dans la table meta à la création."""
+        from anonyfy.detect.gazetteers.loader import gazetteer_version
+
+        r = ScopeRegistry(key=ZERO_KEY, scope=SCOPE, registry_path=registry_path)
+        r.close()
+        con = sqlite3.connect(registry_path)
+        try:
+            row = con.execute("SELECT gazetteer_version FROM meta").fetchone()
+            assert row is not None
+            assert row[0] == gazetteer_version()
+        finally:
+            con.close()
+
+
+# --- OBJ-REC-107: RAM Vault seul < 200 Mo (tracemalloc) ----------------------
+
+
+class TestRamVault:
+    """Phase 27 OBJ-REC-107: un Vault seul (avec lazy loading) consomme < 200 Mo
+    en mémoire. Les gazetteers complets (1,3 M noms) ne sont chargés que si
+    utilisés; le dict _pos est remplacé par tri + bisect (O(log n), zéro dict).
+    """
+
+    def test_ram_vault_seul_sous_200mo(self, tmp_path: Path):
+        """Vault.__init__ froid: la mémoire allouée (tracemalloc) reste < 200 Mo."""
+        from anonyfy import Vault
+
+        tracemalloc.start()
+        snap_before = tracemalloc.take_snapshot()
+        try:
+            v = Vault(key=ZERO_KEY, scope="ram-test", registry_path=str(tmp_path / "r.db"))
+            snap_after = tracemalloc.take_snapshot()
+            v.close()
+        finally:
+            tracemalloc.stop()
+        # Calculer la différence de mémoire entre les deux snapshots.
+        stat_before = snap_before.statistics("filename")
+        stat_after = snap_after.statistics("filename")
+        total_before = sum(s.size for s in stat_before)
+        total_after = sum(s.size for s in stat_after)
+        delta = total_after - total_before
+        # < 200 Mo = 200 * 1024 * 1024 octets.
+        seuil = 200 * 1024 * 1024
+        mo = delta / 1024 / 1024
+        assert delta < seuil, f"RAM Vault = {mo:.1f} Mo > {seuil / 1024 / 1024:.0f} Mo"
