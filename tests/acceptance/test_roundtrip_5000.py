@@ -61,20 +61,15 @@ class TestRoundTrip5000:
         big_masked = "\n".join(masked_lines)
         big_clear = vault.unmask(big_masked)
         clear_lines = big_clear.split("\n")
-        assert len(clear_lines) == len(noms), (
-            f"nb lignes: {len(clear_lines)} != {len(noms)}"
-        )
+        assert len(clear_lines) == len(noms), f"nb lignes: {len(clear_lines)} != {len(noms)}"
         failures: list[str] = []
         for i, (nom, line) in enumerate(zip(noms, clear_lines, strict=True)):
             if line != nom:
-                failures.append(
-                    f"ligne {i}: {nom!r} -> masked {masked_lines[i]!r} -> {line!r}"
-                )
+                failures.append(f"ligne {i}: {nom!r} -> masked {masked_lines[i]!r} -> {line!r}")
                 if len(failures) >= 10:
                     break
-        assert not failures, (
-            f"{len(failures)} round-trip(s) échoué(s) sur 5 000:\n"
-            + "\n".join(failures)
+        assert not failures, f"{len(failures)} round-trip(s) échoué(s) sur 5 000:\n" + "\n".join(
+            failures
         )
 
     def test_substituts_adjacents_colles(self, vault, noms):
@@ -93,9 +88,7 @@ class TestRoundTrip5000:
         # Coller les substituts sans séparateur (réponse LLM sans espacement).
         colles = sub_a + sub_b
         rt = vault.unmask(colles)
-        assert rt == a + b, (
-            f"substituts collés {colles!r} -> unmasked {rt!r}, attendu {a + b!r}"
-        )
+        assert rt == a + b, f"substituts collés {colles!r} -> unmasked {rt!r}, attendu {a + b!r}"
 
     def test_arbitrage_match_exact_vs_variante(self, vault, noms):
         """B2b: un match exact gagne sur une variante de casse de même longueur.
