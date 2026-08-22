@@ -15,6 +15,8 @@ import pytest
 
 from anonyfy import Vault
 from anonyfy.detect.gazetteers.loader import load_noms
+from anonyfy.surrogate.case_pattern import apply_case
+from anonyfy.types import EntityType
 
 _KEY = b"0" * 16
 _SCOPE = "roundtrip-5000"
@@ -93,24 +95,64 @@ class TestRoundTrip5000:
     def test_arbitrage_match_exact_vs_variante(self, vault, noms):
         """B2b: un match exact gagne sur une variante de casse de même longueur.
 
-        Quand le registre contient un substitut patronyme ``BONY`` (clair
-        ``LYONNET``) et un substitut commune ``Bony`` (dont la variante upper
-        ``BONY`` matche le même texte), l'Aho-Corasick émet deux hits pour le
-        span ``BONY``. L'arbitrage doit privilégier le match exact (``BONY``)
-        sur la variante (``Bony``) pour restituer le bon clair.
+        Inscrit au registre deux substituts de casses différentes (ex. un
+        patronyme ``BONY`` majuscule et une commune ``Bony`` Title Case)
+        produisant le même pattern Aho-Corasick via les variantes de casse
+        (``BONY`` upper de ``Bony``). L'Aho-Corasick émet deux hits pour le span
+        ``BONY``: un match exact (``BONY``) et une variante (``Bony``). Le
+        tiebreak ``is_exact`` (match == substitut) départage: le match exact
+        gagne. Retirer ``is_exact`` du tri fait échouer ce test (la variante
+        ``Bony`` gagne par ordre stable et restitue le mauvais clair).
+
+        On parcourt toutes les collisions de variante du registre et on vérifie
+        que le unmask de chaque substitut exact restitue son clair (pas le clair
+        de la variante). Sans ``is_exact``, les collisions où la variante est
+        insérée avant le match exact dans l'Aho-Corasick (ex. ``Bony`` COMMUNE
+        enregistrée avant ``BONY`` PATRONYME) produisent un hit variante qui
+        gagne l'arbitrage par ordre stable.
         """
-        # Le fixture vault (scope=module) partage le registre avec
-        # test_5000_patronymes_roundtrip qui s'exécute en premier et masque les
-        # 5 000 noms. On vérifie le round-trip isolé de chaque substitut sur un
-        # échantillon: le unmask d'un substitut seul (sans contexte) doit
-        # restituer le clair exact même si une variante de casse d'un autre
-        # substitut produit un hit chevauchant de même longueur.
+        # S'assurer que le registre contient les 5 000 substituts (le fixture
+        # module partage le Vault avec test_5000_patronymes_roundtrip qui masque
+        # les 5 000 noms en premier; on masque aussi par sécurité).
+        surrogate_set = set(vault._registry.iter_surrogates())
+        if len(surrogate_set) < 1000:
+            for nom in noms:
+                vault.mask(nom)
+            surrogate_set = set(vault._registry.iter_surrogates())
+
+        # Trouver toutes les collisions: un substitut majuscule ``sub`` dont la
+        # forme Title Case ``sub.title()`` est aussi un substitut d'un type
+        # différent (ex. ``BONY`` PATRONYME vs ``Bony`` COMMUNE).
+        collisions: list[tuple[str, str]] = []
+        for sub in sorted(surrogate_set):
+            title_form = sub.title()
+            if title_form == sub or title_form not in surrogate_set:
+                continue
+            rec_sub = vault._registry.lookup(sub)
+            rec_title = vault._registry.lookup(title_form)
+            if rec_sub is None or rec_title is None:
+                continue
+            if rec_sub.entity_type == rec_title.entity_type:
+                continue
+            collisions.append((sub, title_form))
+        assert collisions, "aucune collision de variante trouvée dans le registre"
+
+        # Pour chaque collision, le unmask du substitut exact doit restituer
+        # le clair de sub (pas le clair de title_form, la variante).
         failures: list[str] = []
-        for nom in noms[:200]:  # échantillon
-            m = vault.mask(nom)
-            rt = vault.unmask(m.text)
-            if rt != nom:
-                failures.append(f"{nom!r} -> {m.text!r} -> {rt!r}")
-                if len(failures) >= 3:
-                    break
-        assert not failures, "arbitrage match exact échoué:\n" + "\n".join(failures)
+        for sub, title_form in collisions:
+            rec_sub = vault._registry.lookup(sub)
+            etype = EntityType.coerce(rec_sub.entity_type)
+            expected = vault._engine.decrypt_surrogate(etype, sub)
+            if rec_sub.case_pattern is not None:
+                expected = apply_case(expected, rec_sub.case_pattern)
+            rt = vault.unmask(sub)
+            if rt != expected:
+                failures.append(
+                    f"{sub!r} ({rec_sub.entity_type}) -> unmask {rt!r}, "
+                    f"attendu {expected!r} (variante {title_form!r} a gagné)"
+                )
+        assert not failures, (
+            f"{len(failures)} collision(s) de variante échouée(s) sur "
+            f"{len(collisions)}:\n" + "\n".join(failures)
+        )
