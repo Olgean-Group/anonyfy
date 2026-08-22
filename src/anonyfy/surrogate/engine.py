@@ -297,9 +297,8 @@ class Engine:
             return sub
         if etype == EntityType.DATE:
             return self._cipher_date.encrypt(span.value)
-        # CODE_POSTAL: géré par le pré-pass ``_compute_cp_surrogates`` dans mask.
-        if etype == EntityType.CODE_POSTAL:
-            return None
+        # CODE_POSTAL: géré par le pré-pass ``_compute_cp_surrogates`` dans mask;
+        # tombe sur le return None par défaut (pas de cipher direct).
         return None
 
     def _compute_cp_surrogates(self, resolved: list[Span]) -> dict[int, tuple[str | None, int]]:
