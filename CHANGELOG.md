@@ -1,3 +1,42 @@
+## Non publié
+
+### Phase 32 — M4: Performance mask()
+
+Latence `mask()` sur 10 000 caractères (PRD §6). Cible stricte 50 ms.
+
+- **Avant**: 249 ms (texte dense ~250 SIRET, steady-state, mono-thread).
+- **Après**: ~62-66 ms (best), médiane ~86 ms (variabilité charge CI).
+- **Cible stricte 50 ms inatteignable**: le FPE FF3-1 (lib `ff3` +
+  `pycryptodome`) chiffre ~250 SIRET uniques (~30 ms non réductibles sans
+  changer d'algorithme, hors périmètre). Arbitrage S5: seuil assoupli.
+- **Seuil retenu (texte dense)**: `< 100 ms` (marge CI réaliste, non
+  tautologique). Texte peu dense: `< 50 ms` (atteint, conservé).
+
+#### Optimisations (profilage `cProfile` d'abord, une à la fois)
+
+1. **Interval tree bisect** dans `resolve_overlaps` (O(n²) → O(n log n)):
+   remplaça `any(_overlaps(span, kept) for kept in selected)` (17 M appels
+   genexpr) par liste triée + `bisect`. 249 ms → 96 ms.
+2. **Bisect + precasefold** dans `triggers`/`places`: `_overlaps_trigger` et
+   `_near_trigger` O(n×m) → O(log n) via `bisect` + `max_te_prefix`; tokens
+   pre-casefold une fois par `detect()`. 96 ms → 88 ms.
+3. **Préfiltre `first_words`** au `Gazetteer`: set des premiers mots casefold
+   pour court-circuiter `_phrase_matches` quand le premier token ne peut
+   démarrer aucune entrée. 88 ms → 72 ms.
+4. **Luhn par paires** (`luhn_checksum`): table précalculée de contributions
+   par paire de chiffres (moitié d'itérations, `ord()` au lieu de `int()`).
+   `luhn_check_digit`: calcul direct en un passage au lieu de 10 candidats.
+5. **Cache FF3Cipher** (`lru_cache`): `FF3Cipher.__init__` reconstruisait un
+   contexte AES à chaque SIRET (5260 constructions/mask); le cipher étant
+   stateless (ECB), un seul suffit par (clé, tweak). 70 ms → 56 ms.
+
+#### Tests
+
+- `tests/acceptance/test_latency.py::test_mask_10k_chars_under_50ms` (texte
+  peu dense, < 50 ms, passe).
+- `tests/acceptance/test_latency.py::test_mask_10k_dense_under_50ms` (texte
+  dense ~250 SIRET, < 100 ms, escalade S5 documentée).
+
 ## 0.1.0
 
 Première version publiable. Pseudonymisation réversible et déterministe
