@@ -148,26 +148,135 @@ class AhoCorasick:
 
     # --- Recherche ----------------------------------------------------------
 
+    @staticmethod
+    def _char_class(ch: str) -> str:
+        """Classe de caractère pour la frontière de mot: 'L' (lettre), 'D' (digit), 'O' (autre)."""
+        if ch.isalpha():
+            return "L"
+        if ch.isdigit():
+            return "D"
+        return "O"
+
+    def _is_at_boundary(self, text: str, start: int, end: int) -> bool:
+        """Vrai si le match [start:end) est à une frontière de mot.
+
+        Le caractère précédant le début et le caractère suivant la fin ne doivent
+        pas être de la même classe (lettre/digit) que le match. Un substitut entre
+        un mot et un espace, ou entre une lettre et un digit, est à une frontière.
+
+        Les caractères non lettre/digit (classe 'O') sont toujours à une
+        frontière: il n'y a pas de « mot » à l'intérieur duquel un '+' ou un '-'
+        pourrait être inclus.
+        """
+        start_cls = self._char_class(text[start])
+        if start > 0 and start_cls in ("L", "D") and start_cls == self._char_class(text[start - 1]):
+            return False
+        end_cls = self._char_class(text[end - 1])
+        if end < len(text) and end_cls in ("L", "D") and end_cls == self._char_class(text[end]):
+            return False
+        return True
+
+    def _find_words(self, text: str) -> list[tuple[int, int]]:
+        """Retourne les (start, end) des runs maximaux de même classe (L ou D)."""
+        words: list[tuple[int, int]] = []
+        i = 0
+        while i < len(text):
+            cls = self._char_class(text[i])
+            if cls in ("L", "D"):
+                j = i
+                while j < len(text) and self._char_class(text[j]) == cls:
+                    j += 1
+                words.append((i, j))
+                i = j
+            else:
+                i += 1
+        return words
+
     def find(self, text: str) -> list[Hit]:
         """Renvoie toutes les occurrences de substituts (et variantes) dans le texte.
 
         Chaque hit expose le substitut canonique retrouvé (``.substitute``) et
         la position du match. L'automate cherche les substituts, jamais le clair.
+
+        Phase 27 OBJ-REC-108: filtrage des faux positifs par frontière de mot
+        et couverture de mot. Règle:
+
+        1. Hit à une frontière de mot (les deux côtés) -> garde.
+        2. Hit court (``len(substitute) < 4``) sans frontière -> rejet (les
+           substituts courts comme « ME », « 42 » sont des sous-chaînes
+           fréquentes dans les mots non masqués: « MEGID », « 4242 »).
+        3. Hit long (``>= 4``) sans frontière -> garde seulement si le mot
+           entier (run de même classe) est entièrement couvert par des hits
+           longs. Cela permet les substituts collés sans séparateur
+           (« RULA » + « MACINA » = « RULAMACINA ») tout en rejetant les
+           matchs partiels (« DALAH » dans « ABDALAHAD »).
         """
         if not self._built:
-            # from_surrogates/from_registry construisent toujours; garde-fou.
             self._build_failure_links()
         root = self._root
         node = root
-        hits: list[Hit] = []
+        raw_hits: list[Hit] = []
         for i, ch in enumerate(text):
             while node is not root and ch not in node.children:
                 node = node.fail  # type: ignore[assignment]
             child = node.children.get(ch)
             if child is not None:
                 node = child
-            # else: node est root et ch absent -> on reste à root (self-loop)
             for sub in node.outputs:
                 start = i - node.depth + 1
-                hits.append(Hit(substitute=sub, start=start, end=i + 1, match=text[start : i + 1]))
-        return hits
+                end = i + 1
+                raw_hits.append(Hit(substitute=sub, start=start, end=end, match=text[start:end]))
+
+        if not raw_hits:
+            return []
+
+        # Pré-calculer les limites de mot pour chaque position.
+        word_starts: list[int] = [0] * len(text)
+        word_ends: list[int] = [len(text)] * len(text)
+        for ws, we in self._find_words(text):
+            for k in range(ws, we):
+                word_starts[k] = ws
+                word_ends[k] = we
+
+        # Grouper les hits longs (>= 4) par mot pour la vérification de couverture.
+        long_hits_by_word: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for h in raw_hits:
+            if len(h.substitute) < 4:
+                continue
+            if h.start >= len(text):
+                continue
+            ws = word_starts[h.start]
+            we = word_ends[h.start]
+            if h.end <= we:  # hit entièrement dans un seul mot
+                long_hits_by_word.setdefault((ws, we), []).append((h.start, h.end))
+
+        # Calculer la couverture de chaque mot par les hits longs.
+        word_fully_covered: dict[tuple[int, int], bool] = {}
+        for (ws, we), intervals in long_hits_by_word.items():
+            intervals.sort()
+            merged = [list(intervals[0])]
+            for s, e in intervals[1:]:
+                if s <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], e)
+                else:
+                    merged.append([s, e])
+            word_fully_covered[(ws, we)] = (
+                len(merged) == 1 and merged[0][0] <= ws and merged[0][1] >= we
+            )
+
+        # Filtrer les hits.
+        filtered: list[Hit] = []
+        for h in raw_hits:
+            if self._is_at_boundary(text, h.start, h.end):
+                filtered.append(h)
+                continue
+            # Hit sans frontière de mot.
+            if len(h.substitute) < 4:
+                continue  # substitut court -> rejet
+            # Substitut long: accepter seulement si le mot est entièrement couvert.
+            if h.start < len(text):
+                ws = word_starts[h.start]
+                we = word_ends[h.start]
+                if h.end <= we and word_fully_covered.get((ws, we), False):
+                    filtered.append(h)
+        return filtered

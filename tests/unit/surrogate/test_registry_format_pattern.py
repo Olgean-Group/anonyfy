@@ -33,9 +33,9 @@ def registry(registry_path: str) -> ScopeRegistry:
 
 
 class TestFormatPattern:
-    def test_schema_version_est_3(self, registry: ScopeRegistry):
-        assert registry.schema_version() == 3
-        assert CURRENT_SCHEMA_VERSION == 3
+    def test_schema_version_est_4(self, registry: ScopeRegistry):
+        assert registry.schema_version() == 4
+        assert CURRENT_SCHEMA_VERSION == 4
 
     def test_colonne_format_pattern_existe(self, registry: ScopeRegistry):
         con = sqlite3.connect(registry.registry_path)
@@ -86,10 +86,10 @@ class TestFormatPattern:
         )
         con.commit()
         con.close()
-        # Ouvrir avec ScopeRegistry: doit migrer vers v3.
+        # Ouvrir avec ScopeRegistry: doit migrer vers v4 (courant).
         r = ScopeRegistry(key=ZERO_KEY, scope=SCOPE, registry_path=path)
         try:
-            assert r.schema_version() == 3
+            assert r.schema_version() == CURRENT_SCHEMA_VERSION
             con = sqlite3.connect(path)
             cols = {row[1] for row in con.execute("PRAGMA table_info(entries)")}
             assert "format_pattern" in cols
@@ -112,11 +112,11 @@ class TestFormatPattern:
         for ch in rec.format_pattern or "":
             assert not ch.isdigit()
 
-    def test_refuse_schema_futur_v4(self, tmp_path: Path):
-        path = str(tmp_path / "v4.db")
+    def test_refuse_schema_futur_v5(self, tmp_path: Path):
+        path = str(tmp_path / "v5.db")
         con = sqlite3.connect(path)
         con.execute("CREATE TABLE meta (schema_version INTEGER NOT NULL, scope TEXT NOT NULL)")
-        con.execute("INSERT INTO meta VALUES (4, ?)", (SCOPE,))
+        con.execute("INSERT INTO meta VALUES (5, ?)", (SCOPE,))
         con.execute("CREATE TABLE entries (surrogate TEXT)")
         con.commit()
         con.close()

@@ -63,7 +63,7 @@ __all__ = [
 
 # Version courante du schéma. Incrémenter en cas de changement de structure;
 # l'ouverture migre les versions antérieures et refuse les versions futures.
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 # Taille de batch: nombre de réservations par transaction commitée. Un batch
 # est atomique (tout ou rien); un crash perd au plus le batch en cours (les
@@ -164,6 +164,7 @@ class ScopeRegistry:
         self._txn_open = False
 
         self._init_schema()
+        self._check_gazetteer_version()
         self._load_into_memory()
 
     # --- Propriétés ---------------------------------------------------------
@@ -183,7 +184,8 @@ class ScopeRegistry:
         con.execute(
             "CREATE TABLE IF NOT EXISTS meta ("
             "  schema_version INTEGER NOT NULL,"
-            "  scope TEXT NOT NULL"
+            "  scope TEXT NOT NULL,"
+            "  gazetteer_version TEXT"
             ")"
         )
         con.execute(
@@ -252,6 +254,13 @@ class ScopeRegistry:
             cols = {row[1] for row in self._conn.execute("PRAGMA table_info(entries)")}
             if "format_pattern" not in cols:
                 self._conn.execute("ALTER TABLE entries ADD COLUMN format_pattern TEXT")
+        # v3 -> v4: ajout colonne gazetteer_version en table meta (phase 27,
+        # OBJ-REC-103). Persiste l'empreinte du gazetteer embarqué pour détecter
+        # une mise à jour qui casserait la réversibilité des registres persistés.
+        if from_version < 4:
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(meta)")}
+            if "gazetteer_version" not in cols:
+                self._conn.execute("ALTER TABLE meta ADD COLUMN gazetteer_version TEXT")
 
     def schema_version(self) -> int:
         row = self._conn.execute("SELECT schema_version FROM meta").fetchone()
@@ -266,6 +275,32 @@ class ScopeRegistry:
         (substituts déjà attribués) d'être O(1) en mémoire, sans index SQLite
         sur des colonnes à insertions aléatoires (qui fragmenteraient le B-tree).
         """
+        for surrogate, entity_type, clear_hmac in self._conn.execute(
+            "SELECT surrogate, entity_type, clear_hmac FROM entries"
+        ):
+            self._hmac_to_surrogate[(entity_type, clear_hmac)] = surrogate
+            self._used_surrogates.add(surrogate)
+
+    # --- Empreinte gazetteer (OBJ-REC-103, D5) ------------------------------
+
+    def _check_gazetteer_version(self) -> None:
+        """Lit/persiste l'empreinte du gazetteer en table meta et lève
+        ``GazetteerVersionMismatch`` si l'empreinte stockée diffère de l'embarquée.
+
+        Phase 27 OBJ-REC-103: à l'ouverture, si un registre existant a été créé
+        avec une version antérieure du gazetteer, les indices décalés cassent
+        la réversibilité -> rejet. Premier ouverture: persiste l'empreinte courante.
+        """
+        from anonyfy.detect.gazetteers.loader import check_gazetteer_version, gazetteer_version
+
+        current = gazetteer_version()
+        row = self._conn.execute("SELECT gazetteer_version FROM meta").fetchone()
+        if row is None or row[0] is None:
+            # Premier ouverture (ou migration v3->v4): persiste l'empreinte courante.
+            self._conn.execute("UPDATE meta SET gazetteer_version=?", (current,))
+            return
+        stored = row[0]
+        check_gazetteer_version(stored)
         for surrogate, entity_type, clear_hmac in self._conn.execute(
             "SELECT surrogate, entity_type, clear_hmac FROM entries"
         ):

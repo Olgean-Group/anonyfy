@@ -73,6 +73,25 @@ langage. Livraison des jalons M0 à M4 du plan v1.2 (phases 01 à 19).
   9 critères d'acceptation v1, test de débit FPE informatif (D14), test
   d'intégration avec clé aléatoire (D6), corpus email (D9).
 
+- **Phase 27** — Gazetteers INSEE complets (S2): noms 879 273 entrées
+  (source: `patronymes.csv` data.gouv.fr), prénoms 36 170 entrées (source:
+  `nat2021_csv.zip` INSEE). Câblage de `check_gazetteer_version` dans
+  `ScopeRegistry.__init__` (OBJ-REC-103, schéma v4, migration
+  ALTER TABLE, `GazetteerVersionMismatch` à la rouverture si l'empreinte
+  diffère). Chargement paresseux par type (OBJ-REC-107: ciphers construits
+  au premier usage, dictionnaire `_pos` remplacé par tri + `bisect`).
+  Filtrage Aho-Corasick par frontière de mot et couverture (corrige le
+  round-trip des patronymes composés exposé par le gazetteer complet).
+
+### Migration
+
+- **Phase 27** — Les registres v0.1.0 antérieurs à la phase 27 sont
+  **incompatibles** avec le nouveau gazetteer. La permutation keyée change
+  avec la taille du gazetteer (879k noms au lieu de 5k), ce qui modifie
+  tous les substituts. À la première ouverture d'un registre existant,
+  `GazetteerVersionMismatch` est levée. Supprimer les registres obsolètes
+  (`rm ~/.anonyfy/registries/*.db`) ou exporter les données avant migration.
+
 ### Sécurité
 
 - Quatre invariants garantis par construction et testés: le clair ne

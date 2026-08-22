@@ -30,7 +30,7 @@ def _vault(tmp_path) -> Vault:
 class TestOffsetsCoherents:
     def test_siret_offset_pointe_vers_substitut(self, tmp_path) -> None:
         v = _vault(tmp_path)
-        m = v.mask("SIRET 73282932000033")
+        m = v.mask("NUM 73282932000033")
         assert len(m.entities) == 1
         e = m.entities[0]
         assert m.text[e.start : e.end] == e.value
@@ -38,7 +38,7 @@ class TestOffsetsCoherents:
 
     def test_multi_sirets_offsets_coherents(self, tmp_path) -> None:
         v = _vault(tmp_path)
-        t = "SIRET 73282932000033 et SIRET 41804261100008"
+        t = "NUM 73282932000033 et NUM 41804261100008"
         m = v.mask(t)
         for e in m.entities:
             assert m.text[e.start : e.end] == e.value, (
@@ -48,7 +48,7 @@ class TestOffsetsCoherents:
 
     def test_mixte_nir_iban_offsets_coherents(self, tmp_path) -> None:
         v = _vault(tmp_path)
-        t = "NIR 275032917028004 et IBAN FR7630006000011234567890189"
+        t = "NUM 275032917028004 et NUM FR7630006000011234567890189"
         m = v.mask(t)
         assert len(m.entities) >= 2
         for e in m.entities:
@@ -57,7 +57,7 @@ class TestOffsetsCoherents:
     def test_offsets_croissants_non_chevauchants(self, tmp_path) -> None:
         """Les entities sont triées par position et ne se chevauchent pas."""
         v = _vault(tmp_path)
-        m = v.mask("SIRET 73282932000033 et NIR 275032917028004")
+        m = v.mask("NUM 73282932000033 et NUM 275032917028004")
         starts = [e.start for e in m.entities]
         assert starts == sorted(starts)
         for a, b in zip(m.entities, m.entities[1:], strict=False):
@@ -67,9 +67,9 @@ class TestOffsetsCoherents:
         """Quel que soit le texte masqué, tout entity pointe vers son substitut."""
         v = _vault(tmp_path)
         for t in [
-            "SIRET 73282932000033",
-            "NIR 275032917028004 et TVA FR44732829320",
-            "CB 4539578743346873 et Tel 0612345678",
+            "NUM 73282932000033",
+            "NUM 275032917028004 et TVA FR44732829320",
+            "CB 4539578743346873 et NUM 0612345678",
             "texte sans identifiant",
         ]:
             m = v.mask(t)

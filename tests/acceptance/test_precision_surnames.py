@@ -83,18 +83,20 @@ _REAL_PATRONYMES: tuple[str, ...] = (
 
 # Mots communs non-patronymes (absents du gazetteer) utilises comme distracteurs
 # en contexte declenche. Aucun ne doit atteindre la confiance _TRIGGERED_CONF
-# en tant que PATRONYME (sinon FP).
+# en tant que PATRONYME (sinon FP). Phase 27 OBJ-REC-108: distracteurs mis à
+# jour pour le gazetteer INSEE complet (879k noms) — « Patient », « Docteur »,
+# « Service » etc. sont désormais des patronymes réels du gazetteer.
 _DISTRACTORS: tuple[str, ...] = (
-    "Patient",
     "Directeur",
-    "Docteur",
-    "Chirurgien",
-    "Service",
-    "Hopital",
-    "Medecin",
     "Infirmier",
     "Radiologue",
     "Cardiologue",
+    "Urgence",
+    "Stagiaire",
+    "Apprenti",
+    "Beneficiaire",
+    "Usager",
+    "Convalescent",
 )
 
 
