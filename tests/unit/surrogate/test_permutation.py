@@ -119,6 +119,66 @@ class TestCycleWalking:
             assert p.decrypt(p.encrypt(x)) == x
 
 
+class TestImagesFigesD35j:
+    """Phase 35 — D35j (OBJ-003): non-régression des images de la permutation.
+
+    Vecteurs figés calculés avec la référence 0.1.2 (objet ``hmac.new`` par
+    tour). La phase 35 remplace par ``hmac.copy()`` (D35d) qui produit
+    exactement le même digest; ces vecteurs doivent rester identiques. Un
+    changement de primitive HMAC ferait échouer ce test (migration des
+    registres persistés 0.1.2 non sûre).
+
+    ``n`` sont les tailles réelles des gazetteers 0.1.2 (879 273 patronymes,
+    36 170 prénoms, 32 493 communes). ``Permutation`` ne dépend que de
+    ``n`` (pas du loader), le test n'a pas besoin de charger les gazetteers.
+    """
+
+    def test_images_patronyme_n_reel(self):
+        p = Permutation(key=b"0" * 16, scope="frozen", entity_type="patronyme", n=879273)
+        assert [p.encrypt(i) for i in range(10)] == [
+            492128,
+            288580,
+            728823,
+            758276,
+            297942,
+            404671,
+            350386,
+            775085,
+            376763,
+            808787,
+        ]
+
+    def test_images_prenom_n_reel(self):
+        p = Permutation(key=b"0" * 16, scope="frozen", entity_type="prenom", n=36170)
+        assert [p.encrypt(i) for i in range(10)] == [
+            17560,
+            18708,
+            10146,
+            35570,
+            8158,
+            6280,
+            24213,
+            31586,
+            10403,
+            13735,
+        ]
+
+    def test_images_commune_n_reel(self):
+        p = Permutation(key=b"0" * 16, scope="frozen", entity_type="commune", n=32493)
+        assert [p.encrypt(i) for i in range(10)] == [
+            30627,
+            15501,
+            31610,
+            10946,
+            20330,
+            12494,
+            10555,
+            27123,
+            16629,
+            26518,
+        ]
+
+
 class TestEdgeCases:
     """Cas limites."""
 

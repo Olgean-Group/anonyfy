@@ -42,6 +42,14 @@ class Permutation:
         self._half_bits = (k_total + 1) // 2
         self._half_mask = (1 << self._half_bits) - 1
         self._block_size = 1 << self._half_bits  # taille d'une moitié
+        # Phase 35 (D35d): objet HMAC unique préparé avec la clé, puis
+        # ``.copy()`` par appel dans ``_round_function``. ``hmac.new(key,
+        # msg).digest()`` == ``hmac.new(key).copy().update(msg).digest()``
+        # (vérifié empiriquement), donc les images de la permutation sont
+        # strictement inchangées (invariant 2, migration des registres 0.1.2
+        # sûre). ``hashlib.blake2b`` est interdit (D35d). Gain: 11,1 M
+        # constructions ``hmac.new`` éliminées (R2, ~37 s sur le premier mask).
+        self._hmac = hmac.new(key, digestmod=hashlib.sha256)
 
     def _round_function(self, right: int, round_index: int) -> int:
         """F(R) = int.from_bytes(HMAC-SHA256(key, scope||type||round||R), 'big') mod block_size."""
@@ -54,7 +62,9 @@ class Permutation:
             + b"|"
             + right.to_bytes((self._half_bits + 7) // 8 or 1, "big")
         )
-        digest = hmac.new(self._key, msg, hashlib.sha256).digest()
+        h = self._hmac.copy()
+        h.update(msg)
+        digest = h.digest()
         return int.from_bytes(digest, "big") % self._block_size
 
     def _feistel_block(self, x: int) -> int:

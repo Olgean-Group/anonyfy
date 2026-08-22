@@ -124,6 +124,40 @@ class TestDeterminisme:
             assert c.encrypt("Martin") == c.encrypt("Martin")
 
 
+class TestImagesFigeesD35j:
+    """Phase 35 — D35j (OBJ-003): images du cipher figées (référence 0.1.2).
+
+    Vecteurs calculés sur la référence 0.1.2 (matérialisation + dérangement +
+    ``hmac.new`` par tour). La phase 35 supprime la matérialisation ET le
+    dérangement mais garde la même permutation brute (``hmac.copy()`` ==
+    ``hmac.new`` + ``update``) : pour les noms hors rotation des points fixes,
+    ``encrypt`` doit produire EXACTEMENT les mêmes images (migration des
+    registres persistés 0.1.2, invariant 2). Les indices de ces 10 noms sont
+    hors de la rotation du dérangement (les 2 indices modifiés 254081/254082
+    ne sont pas atteints par les encrypt ci-dessous).
+    """
+
+    def test_encrypt_vecteurs_figes_0_1_2(self):
+        from anonyfy.detect.gazetteers.loader import load_noms
+
+        key = b"0" * 16
+        c = GazetteerCipher(key, "frozen", "patronyme", load_noms())
+        attendus = {
+            "AURAGNIER": "OSORIO LOPEZ",
+            "RAIO": "AKACHKACHY",
+            "REHAZ": "RUKSE",
+            "MACHTEL": "FIRMIN PLUQUET",
+            "THEILLOUT": "BOUYAJAR",
+            "ESSLMANI": "HAVLIN",
+            "MARTINEZ Y SANZ": "PAJAMANDY",
+            "MSAYIF": "FERTAHI",
+            "BENALLAL AKHDAR": "LUBI LEON",
+            "BOULUD": "SANGO",
+        }
+        for clair, attendu in attendus.items():
+            assert c.encrypt(clair) == attendu, f"{clair} -> {c.encrypt(clair)}"
+
+
 class TestCasefold:
     """Lookup insensible à la casse."""
 
