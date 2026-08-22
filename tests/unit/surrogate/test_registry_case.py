@@ -38,7 +38,13 @@ class TestClassifyCase:
 
 
 class TestApplyCase:
-    """apply_case restitue la casse depuis la forme majuscule du gazetteer."""
+    """apply_case restitue la casse depuis la forme du gazetteer.
+
+    Le gazetteer communes est en Title Case (ex. ``Vauchassis``), le gazetteer
+    patronymes est en majuscule (ex. ``BELLON``). ``apply_case`` doit restituer
+    la casse d'origine du clair quelle que soit la forme du nom gazetteer fourni
+    en entrée: elle normalise en majuscule puis applique le pattern.
+    """
 
     def test_uc(self):
         assert apply_case("MARC LEROY", "U:U") == "MARC LEROY"
@@ -56,6 +62,23 @@ class TestApplyCase:
         assert apply_case("JEAN", "U") == "JEAN"
         assert apply_case("JEAN", "l") == "jean"
         assert apply_case("JEAN", "T") == "Jean"
+
+    def test_entree_title_vers_uc(self):
+        """B2a: entrée Title Case (gazetteer communes), code U -> majuscule."""
+        assert apply_case("Bellon", "U") == "BELLON"
+        assert apply_case("Vauchassis", "U") == "VAUCHASSIS"
+
+    def test_entree_title_vers_lc(self):
+        """B2a: entrée Title Case, code l -> minuscule."""
+        assert apply_case("Bellon", "l") == "bellon"
+
+    def test_entree_title_vers_tc(self):
+        """B2a: entrée Title Case, code T -> Title Case (identique)."""
+        assert apply_case("Bellon", "T") == "Bellon"
+
+    def test_entree_minuscule_vers_uc(self):
+        """B2a: entrée minuscule, code U -> majuscule."""
+        assert apply_case("bellon", "U") == "BELLON"
 
 
 class TestRegisterCasePattern:
