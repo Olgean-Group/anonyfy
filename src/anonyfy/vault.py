@@ -29,7 +29,7 @@ from anonyfy.resolve.aho_corasick import AhoCorasick
 from anonyfy.surrogate.case_pattern import apply_case
 from anonyfy.surrogate.engine import Engine
 from anonyfy.surrogate.registry import ScopeRegistry
-from anonyfy.types import EntityType, MaskedText
+from anonyfy.types import EntityType, MaskedText, UnresolvedSpanError
 
 __all__ = ["UnresolvedSpanError", "Vault"]
 
@@ -39,14 +39,6 @@ __all__ = ["UnresolvedSpanError", "Vault"]
 # faible). Ce seuil est interne au mode policy (pas de changement de
 # l'arbitrage phase 13) — à valider par l'orchestrateur (D27 ou suivant).
 WEAK_CONFIDENCE_THRESHOLD: float = 0.8
-
-
-class UnresolvedSpanError(Exception):
-    """Levée en ``policy="strict"`` quand un span de confiance faible non
-    confirmé par contexte est rencontré (confidence < seuil).
-
-    Référence: PLAN.md phase 17 (PRD F8), critère 3.
-    """
 
 
 class Vault:
@@ -131,7 +123,10 @@ class Vault:
                 f"policy strict: {types} (confidence < {WEAK_CONFIDENCE_THRESHOLD})"
             )
 
-        result = self._engine.mask(text)
+        # Phase 35 (D35h): en policy strict, un span non masquable (substitut
+        # final == clair après sondage borné) lève UnresolvedSpanError via le
+        # filet global de Engine.mask (aucune fuite silencieuse).
+        result = self._engine.mask(text, strict=self._policy == "strict")
         self._mask_calls += 1
         for span in result.entities:
             self._type_counts[span.type] += 1

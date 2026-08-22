@@ -24,6 +24,7 @@ import pytest
 
 from anonyfy import Vault
 from anonyfy.audit import AuditLog
+from anonyfy.types import EntityType
 from anonyfy.vault import UnresolvedSpanError
 
 _KEY = b"0" * 16
@@ -147,6 +148,28 @@ class TestPermissiveAvertissementJournalise:
             assert "value" not in w
         # Le clair ne figure pas dans l'avertissement serialize.
         assert "Pierre" not in json.dumps(weak, ensure_ascii=False)
+
+
+class TestStrictNonMasquable:
+    """Phase 35 — S1 (D35f/D35h): en strict, un cas non masquable lève.
+
+    Un substitut final == clair (point fixe que le sondage ne peut pas défaire)
+    est une fuite: en ``permissive`` le dernier recours est clair + UserWarning
+    (testé dans test_no_leak_composite.py), en ``strict`` il lève
+    ``UnresolvedSpanError`` (OBJ-005).
+    """
+
+    def test_strict_leve_sur_cp_point_fixe(self, strict_vault):
+        # Point fixe injecté dans le registre (substitut == clair), comme une
+        # entrée persistée par une version cassée; plus rien ne peut le défaire.
+        # La casse de l'entité doit être la casse canonique du mask
+        # (EntityType.value = "CODE_POSTAL"), sinon l'idempotence du registre
+        # ne s'applique pas (HMAC scope||type||clair).
+        strict_vault._registry.register_fpe(
+            EntityType.CODE_POSTAL.value, "16000", surrogate="16000", clear_index=16000
+        )
+        with pytest.raises(UnresolvedSpanError):
+            strict_vault.mask("Je demeure à 16000")
 
 
 class TestPolicyInvalide:
