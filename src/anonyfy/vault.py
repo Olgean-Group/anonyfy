@@ -22,6 +22,7 @@ from collections import Counter
 from collections.abc import Iterable
 
 from anonyfy.audit import AuditLog
+from anonyfy.detect.normalize import reinsert_template
 from anonyfy.json_walk import _compile_patterns, walk_mask, walk_unmask
 from anonyfy.report import render_report
 from anonyfy.resolve.aho_corasick import AhoCorasick
@@ -187,6 +188,11 @@ class Vault:
             # D24: restituer la casse originale pour les types gazetteer.
             if record.case_pattern is not None:
                 clear = apply_case(clear, record.case_pattern)
+            # Phase 24 (OBJ-REC-101): restituer la forme séparée d'origine depuis
+            # le clair compact + le template de formatage (séparateurs + 2A/2B +
+            # 0 de +33 0X). Jamais le clair n'est dans le template (invariant 1).
+            if record.format_pattern is not None:
+                clear = reinsert_template(clear, record.format_pattern)
             orig_start = offset_map[hit.start]
             orig_end = offset_map[hit.end - 1] + 1
             replacements.append((orig_start, orig_end, clear))

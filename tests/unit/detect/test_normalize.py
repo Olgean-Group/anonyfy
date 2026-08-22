@@ -15,13 +15,10 @@ from pathlib import Path
 import pytest
 
 from anonyfy.detect.normalize import (
-    Run,
     build_template,
     reinsert_template,
     tokenize_runs,
 )
-from anonyfy.types import EntityType
-
 
 # --- Tokenisation: runs isolés ---------------------------------------------
 
@@ -181,7 +178,10 @@ class TestTemplate:
         runs = tokenize_runs(text)
         r = runs[0]
         tmpl = build_template(text, r, 0, len(r.projection))
-        assert reinsert_template("FR761234567890123456789", tmpl) == "FR76 123 456 789 012 345 678 9"
+        assert (
+            reinsert_template("FR761234567890123456789", tmpl)
+            == "FR76 123 456 789 012 345 678 9"
+        )
 
     def test_template_sans_separateur_renvoie_none(self):
         text = "tel 0612345678"
@@ -233,9 +233,9 @@ class TestRoundtripSepare:
         assert vault.unmask(m.text) == "SIRET 552 100 554 00021"
 
     def test_roundtrip_separe_iban_espaces(self, vault):
-        m = vault.mask("IBAN FR76 123 456 789 012 345 678 9")
-        assert "FR76 123 456 789 012 345 678 9" not in m.text
-        assert vault.unmask(m.text) == "IBAN FR76 123 456 789 012 345 678 9"
+        m = vault.mask("IBAN FR80 1000 0000 0000 0000 0000 000")
+        assert "FR80 1000 0000 0000 0000 0000 000" not in m.text
+        assert vault.unmask(m.text) == "IBAN FR80 1000 0000 0000 0000 0000 000"
 
 
 # --- Critères d'acceptation PLAN (no-leak) ---------------------------------

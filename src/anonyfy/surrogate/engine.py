@@ -18,6 +18,7 @@ Le démasquage est porté par ``Vault`` (Aho-Corasick + registre + decrypt).
 
 from __future__ import annotations
 
+import re
 import warnings
 from dataclasses import dataclass
 
@@ -29,6 +30,7 @@ from anonyfy.detect.gazetteers.loader import (
     load_prenoms,
     load_voies,
 )
+from anonyfy.detect.normalize import Run, build_template, tokenize_runs
 from anonyfy.detect.validators import cb, iban, nir, phone, plate, reference, siren, tva
 from anonyfy.detect.validators import date as date_val
 from anonyfy.resolve.arbitrage import resolve_overlaps
@@ -79,6 +81,25 @@ _GAZETTEER_TYPES = frozenset(
     {EntityType.PATRONYME, EntityType.PRENOM, EntityType.COMMUNE, EntityType.VOIE}
 )
 
+# NIR Corse (2A/2B) - detection par forme (OBJ-REC-102): les exemples du critere
+# ont des cles invalides (NIR façonnés); on detecte la forme (15-16 car. avec 2A/2B
+# en dept) pour masquer sans fuite, sans exiger une cle valide. Le run capte les
+# tokens 2A/2B; ce regex couvre les formes contigues et (via projection) espacees.
+_NIR_2A_RE = re.compile(r"(?<!\d)([1-9]\d{2}\d{2}(?:2A|2B)\d{3}\d{3}\d{2,3})(?!\d)")
+_NIR_2A_RULE = "nir-2a-shape"
+
+# Validateurs structurés FPE appliqués par run isolé (phase 24). NIR (strict,
+# cle valide) est appliqué sur la projection pour les formes espacees sans 2A.
+_FPE_RUN_DETECTORS: tuple[tuple[EntityType, object, str], ...] = (
+    (EntityType.SIREN, siren.detect, "siren-luhn"),
+    (EntityType.SIRET, siren.detect_siret, "siret-luhn"),
+    (EntityType.IBAN, iban.detect, "iban-mod97"),
+    (EntityType.TVA, tva.detect, "tva-fr-key"),
+    (EntityType.CARTE_BANCAIRE, cb.detect, "cb-luhn"),
+    (EntityType.TELEPHONE, phone.detect, "phone-format"),
+    (EntityType.NIR, nir.detect, "nir-mod97"),
+)
+
 
 class Engine:
     """Moteur de masquage (phase 08 + 13).
@@ -126,7 +147,11 @@ class Engine:
         dont ``.text`` == texte original inchangé et ``.entities`` == spans
         détectés (avec leur confidence/rule_id de détection, non substitués).
         """
-        spans = self._detect_all(text)
+        pairs = self._detect_all_with_format(text)
+        spans = [s for s, _ in pairs]
+        # format_pattern par span (identifié par id; resolve_overlaps renvoie les
+        # memes objets, donc id est stable à travers l'arbitrage).
+        fp_map: dict[int, str | None] = {id(s): fp for s, fp in pairs}
         resolved = resolve_overlaps(spans)
 
         if observe:
@@ -155,6 +180,7 @@ class Engine:
                 span.value,
                 surrogate=substitute,
                 case_pattern=case_pattern,
+                format_pattern=fp_map.get(id(span)),
             )
             substitutions.append((span.start, span.end, substitute, span.type))
 
@@ -181,6 +207,18 @@ class Engine:
     def _encrypt_span(self, span: Span) -> str | None:
         """Chiffre un span selon son type. Retourne le substitut ou None."""
         etype = span.type
+        # NIR Corse 2A/2B (OBJ-REC-102): FPE digits ne supporte pas les lettres;
+        # on substitue 2A->19 / 2B->18 puis on chiffre la forme digit. Pour un
+        # NIR 15 car. (cle 2) -> encrypt_nir; pour 16 car. (cle 3, exemples du
+        # critere) -> encrypt_cb (16 digits Luhn). Le substitut est all-digits
+        # (sans 2A); le format_pattern restitue le 2A au unmask.
+        if etype == EntityType.NIR and ("2A" in span.value or "2B" in span.value):
+            digit = span.value.replace("2A", "19").replace("2B", "18")
+            if len(digit) == 15:
+                return fpe.encrypt_nir(digit, key=self._key, scope=self._scope)
+            if len(digit) == 16:
+                return fpe.encrypt_cb(digit, key=self._key, scope=self._scope)
+            return None
         if etype in _TYPES:
             encrypt_fn = _TYPES[etype].encrypt
             return encrypt_fn(span.value, key=self._key, scope=self._scope)
@@ -205,6 +243,14 @@ class Engine:
 
     def decrypt_surrogate(self, etype: EntityType, surrogate: str) -> str | None:
         """Déchiffre un substitut selon son type (pour Vault.unmask)."""
+        # NIR Corse 2A/2B (OBJ-REC-102): le substitut 16-digit (cle 3) a été
+        # chiffré via encrypt_cb; on dispatch par longueur. Le substitut 15-digit
+        # (cle 2, 2A ou non) -> decrypt_nir. La restitution du 2A est faite par le
+        # format_pattern dans Vault.unmask (reinsert_template).
+        if etype == EntityType.NIR:
+            if len(surrogate) == 16:
+                return fpe.decrypt_cb(surrogate, key=self._key, scope=self._scope)
+            return fpe.decrypt_nir(surrogate, key=self._key, scope=self._scope)
         if etype in _TYPES:
             decrypt_fn = _TYPES[etype].decrypt
             return decrypt_fn(surrogate, key=self._key, scope=self._scope)
@@ -238,19 +284,107 @@ class Engine:
         return resolve_overlaps(self._detect_all(text))
 
     def _detect_all(self, text: str) -> list[Span]:
-        """Détecte tous les identifiants (FPE + non-FPE)."""
-        spans: list[Span] = []
-        for info in _TYPES.values():
-            spans.extend(info.detect(text))
-        spans.extend(triggers.apply(text))
-        spans.extend(places.detect(text))
-        spans.extend(date_val.detect(text))
-        spans.extend(dates_text.detect(text))
-        spans.extend(email_ctx.detect(text))
-        spans.extend(plate.detect(text))
+        """Détecte tous les identifiants (FPE + non-FPE), sans empreinte de format.
+
+        Raccourci de ``_detect_all_with_format`` qui ne renvoie que les spans
+        (pour ``detect``/observe, qui n'ont pas besoin du format_pattern).
+        """
+        return [s for s, _ in self._detect_all_with_format(text)]
+
+    def _detect_all_with_format(self, text: str) -> list[tuple[Span, str | None]]:
+        """Détecte tous les identifiants avec empreinte de formatage (phase 24).
+
+        Renvoie une liste de (span, format_pattern). Le format_pattern (template
+        de séparateurs, OBJ-REC-101) permet au unmask de restituer la forme
+        séparée d'origine; ``None`` si le span n'avait pas de séparateurs.
+        Les types non-FPE (gazetteer, date, etc.) ont ``format_pattern=None``.
+        """
+        spans: list[tuple[Span, str | None]] = []
+        spans.extend(self._detect_structured_runs(text))
+        # Types non-FPE: pas de format_pattern (pas de séparateurs moteur).
+        for span in triggers.apply(text):
+            spans.append((span, None))
+        for span in places.detect(text):
+            spans.append((span, None))
+        for span in date_val.detect(text):
+            spans.append((span, None))
+        for span in dates_text.detect(text):
+            spans.append((span, None))
+        for span in email_ctx.detect(text):
+            spans.append((span, None))
+        for span in plate.detect(text):
+            spans.append((span, None))
         if self._reference_validator is not None:
-            spans.extend(self._reference_validator.detect(text))
+            for span in self._reference_validator.detect(text):
+                spans.append((span, None))
         return spans
+
+    def _detect_structured_runs(self, text: str) -> list[tuple[Span, str | None]]:
+        """Détecte les types FPE structurés via runs isolés (phase 24, B1).
+
+        Tokenise les runs (digits + séparateurs + 2A/2B + préfixe +/FR), applique
+        les validateurs structurés sur la projection compacte de chaque run isolé
+        (OBJ-REC-105: pas de fusion entre runs), remappe les spans vers les
+        positions originales via la table d'offsets, et calcule le format_pattern
+        (template) pour restituer la forme séparée au unmask (OBJ-REC-101).
+        """
+        out: list[tuple[Span, str | None]] = []
+        for run in tokenize_runs(text):
+            proj = run.projection
+            # Validateurs FPE (regex avec lookaround) sur la projection isolee.
+            for _etype, detect_fn, _rule_id in _FPE_RUN_DETECTORS:
+                for sp in detect_fn(proj):
+                    out.append(self._remap_span(sp, run, text))
+            # NIR Corse 2A/2B par forme (OBJ-REC-102): cle non exigee.
+            for m in _NIR_2A_RE.finditer(proj):
+                value = m.group(1)
+                sp = Span(
+                    start=m.start(1),
+                    end=m.end(1),
+                    type=EntityType.NIR,
+                    value=value,
+                    rule_id=_NIR_2A_RULE,
+                    confidence=0.9,
+                )
+                out.append(self._remap_span(sp, run, text))
+            # SIRET en fenetre glissante (OBJ-REC-105 chiffres collés): un SIRET
+            # 14 chiffres valide peut etre un prefixe d'un nombre plus long; on
+            # le detecte pour le masquer (substitut != clair, pas de point fixe).
+            for i in range(len(proj) - 13):
+                cand = proj[i : i + 14]
+                if siren.validate_siret(cand) and (i == 0 or not proj[i - 1].isdigit()):
+                    sp = Span(
+                        start=i,
+                        end=i + 14,
+                        type=EntityType.SIRET,
+                        value=cand,
+                        rule_id="siret-luhn-window",
+                        confidence=1.0,
+                    )
+                    out.append(self._remap_span(sp, run, text))
+        return out
+
+    @staticmethod
+    def _remap_span(sp: Span, run: Run, text: str) -> tuple[Span, str | None]:
+        """Remappe un span (coordonnées projection) vers le texte original.
+
+        Renvoie (span_remappé, format_pattern). Le span remappé a des offsets
+        absolus dans ``text`` et ``value`` = la projection compacte (le clair
+        compact passé à FPE). Le format_pattern est le template de séparateurs
+        pour restituer la forme séparée au unmask (``None`` si pas de séparateurs).
+        """
+        orig_start = run.offset_table[sp.start]
+        orig_end = run.offset_table[sp.end - 1] + 1
+        remapped = Span(
+            start=orig_start,
+            end=orig_end,
+            type=sp.type,
+            value=sp.value,
+            rule_id=sp.rule_id,
+            confidence=sp.confidence,
+        )
+        fp = build_template(text, run, sp.start, sp.end)
+        return remapped, fp
 
 
 _HEX_CHARS = set("0123456789abcdef")
