@@ -1,3 +1,11 @@
+## 0.1.2 (2026-08-22)
+
+Correction du défaut `__version__` : la 0.1.1 a été publiée sur PyPI avec
+`anonyfy.__version__ == "0.1.0"` (oubli du bump dans
+`src/anonyfy/__init__.py` lors de la phase 33). Alignement de
+`__version__` sur la version du paquet déclarée dans `pyproject.toml`.
+Aucun changement fonctionnel ; 0.1.1 reste sur PyPI (yankable plus tard).
+
 ## 0.1.1 (2026-08-22)
 
 Correctifs recette v0.1.0 : séparateurs SIRET/SIREN (B1), points fixes
