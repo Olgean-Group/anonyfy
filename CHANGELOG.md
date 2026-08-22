@@ -1,3 +1,61 @@
+## 0.1.3 (2026-08-22)
+
+Correctifs recette 0.1.2 (phases 34-36) : précision patronymes/prénoms (R1),
+premier mask() < 3 s (R2), filet global anti-fuite + détection patronymes
+composés (S1), restitution casse des noms composés (B2). Aucun changement
+d'API publique ; tag v0.1.3 et publication PyPI réservés à l'orchestrateur.
+
+### R1 (phase 34) — Précision patronymes/prénoms
+
+Le premier mot de chaque phrase n'est plus masqué sans contexte.
+
+- **Avant** : tout candidat gazetteer (noms ou prénoms) émettait un span,
+  y compris en initiale de phrase sans déclencheur (« Le contrat prend
+  effet... » masquait « Le », « Paul est arrivé hier. » masquait « Paul »).
+- **Après** : liste d'exclusion `EXCLUDED_NOMS` (mots-outils + acronymes :
+  `le, la, les, il, elle, nous, vous, cette, ce, ces, des, pour, sur, dans,
+  par, avec, sans, nir, siret, siren, iban, tva, rib`) appliquée en filtre
+  global sur tous les candidats PATRONYME ; candidats nus (PATRONYME et
+  PRENOM, sans déclencheur, confiance < 0.8) non émis en `permissive`
+  (conservés en `strict` pour lever et en `observe` pour montrer).
+- Précision patronymes en contexte déclenché restaurée : le premier mot des
+  phrases sans donnée personnelle est préservé.
+
+### R2 (phase 35) — Premier mask() < 3 s
+
+- **Avant** : permutation Feistel matérialisée (`forward = [perm.encrypt(i)
+  for i in range(n)]`, O(N) sur 879 273 noms) + reconstruction de
+  `hmac.new()` à chaque tour → premier mask() 52 s (cible PRD §10 < 30 s
+  non tenue).
+- **Après** : permutation paresseuse calculable valeur par valeur (O(1) par
+  nom) + objet HMAC unique préparé puis `.copy()` par tour (blake2b
+  interdit, images figées 0.1.2 inchangées → migration des registres sûre).
+  Premier mask() 52 s → < 3 s (cible PRD §10 tenue).
+
+### S1 (phase 35) — Filet global anti-fuite + patronymes composés
+
+- Filet de sûreté **global** appliqué après la boucle de substitution sur la
+  liste `substitutions` (vérifie `substitute != text[start:end]` pour chaque
+  entrée), couvrant tous les chemins (CP, FPE, gazetteer, context-capture).
+- En `permissive` : sondage borné (max 1000 tentatives) jusqu'à un substitut
+  non-collisionnant ; `UserWarning` seulement si la fuite reste avérée après
+  sondage. En `strict` : `UnresolvedSpanError` dans tous les cas.
+- Détection multi-mots des patronymes composés (jusqu'à 3 mots) via le
+  préfiltre `first_words` (O(1) par premier mot). 0 patronyme composé de la
+  recette (« ALTOUBAH MIANGOGO », « MIKISSI NLEMVO », « MAYEYA N'YALA »,
+  « ENGOUTA MAMBINDA », « TEJONA JOKUNG », « BASEKAYI KABUNDI », « ADEBUJI
+  ONIKOYI », « KUSONI KAYILU ») ne ressort identique.
+
+### B2 (phase 36) — Restitution casse des noms composés
+
+- **Cause identifiée** : `title()` global capitalisait les particules
+  (« de » → « De » dans « DUPONT DE LIGONNÈS ») et l'article élidé (« l' » →
+  « L' »).
+- **Corrigé** : `apply_case` encode la casse par segment (`T-l-T` / `l'T`)
+  au lieu de `title()` global. Round-trip résidu 0,25 % (5/2 000) → 0.
+- Compte de tests : 1129 passed (949 en 0.1.2 base, 1108 après phase 34,
+  1112 après phase 35).
+
 ## 0.1.2 (2026-08-22)
 
 Correction du défaut `__version__` : la 0.1.1 a été publiée sur PyPI avec
