@@ -124,10 +124,13 @@ class Engine:
             reference.ReferenceValidator(reference_patterns) if reference_patterns else None
         )
         # Ciphers non-FPE (construits une fois; gazetteers cached).
-        self._cipher_patronyme = GazetteerCipher(key, scope, "patronyme", load_noms())
-        self._cipher_prenom = GazetteerCipher(key, scope, "prenom", load_prenoms())
-        self._cipher_commune = GazetteerCipher(key, scope, "commune", load_communes())
-        self._cipher_voie = GazetteerCipher(key, scope, "voie", load_voies())
+        # Phase 27 OBJ-REC-107: lazy loading par type. Les ciphers gazetteer
+        # ne sont construits qu'au premier usage (économise ~220 Mo de RAM si
+        # un Vault ne masque que des types FPE, et accélère l'init froid).
+        self._cipher_patronyme: GazetteerCipher | None = None
+        self._cipher_prenom: GazetteerCipher | None = None
+        self._cipher_commune: GazetteerCipher | None = None
+        self._cipher_voie: GazetteerCipher | None = None
         self._cipher_plate = PlateCipher(key, scope)
         self._cipher_reference = ReferenceCipher(key, scope)
         self._cipher_email = EmailCipher(key, scope)
@@ -204,6 +207,10 @@ class Engine:
         entities.sort(key=lambda s: s.start)
         return MaskedText(text=masked, entities=tuple(entities))
 
+    def _build_cipher(self, kind: str, loader) -> GazetteerCipher:
+        """Construit un GazetteerCipher paresseusement (OBJ-REC-107)."""
+        return GazetteerCipher(self._key, self._scope, kind, loader())
+
     def _encrypt_span(self, span: Span) -> str | None:
         """Chiffre un span selon son type. Retourne le substitut ou None."""
         etype = span.type
@@ -223,12 +230,20 @@ class Engine:
             encrypt_fn = _TYPES[etype].encrypt
             return encrypt_fn(span.value, key=self._key, scope=self._scope)
         if etype == EntityType.PATRONYME:
+            if self._cipher_patronyme is None:
+                self._cipher_patronyme = self._build_cipher("patronyme", load_noms)
             return self._cipher_patronyme.encrypt(span.value)
         if etype == EntityType.PRENOM:
+            if self._cipher_prenom is None:
+                self._cipher_prenom = self._build_cipher("prenom", load_prenoms)
             return self._cipher_prenom.encrypt(span.value)
         if etype == EntityType.COMMUNE:
+            if self._cipher_commune is None:
+                self._cipher_commune = self._build_cipher("commune", load_communes)
             return self._cipher_commune.encrypt(span.value)
         if etype == EntityType.VOIE:
+            if self._cipher_voie is None:
+                self._cipher_voie = self._build_cipher("voie", load_voies)
             return self._cipher_voie.encrypt(span.value)
         if etype == EntityType.PLAQUE_SIV:
             return self._cipher_plate.encrypt(span.value)
@@ -255,12 +270,20 @@ class Engine:
             decrypt_fn = _TYPES[etype].decrypt
             return decrypt_fn(surrogate, key=self._key, scope=self._scope)
         if etype == EntityType.PATRONYME:
+            if self._cipher_patronyme is None:
+                self._cipher_patronyme = self._build_cipher("patronyme", load_noms)
             return self._cipher_patronyme.decrypt(surrogate)
         if etype == EntityType.PRENOM:
+            if self._cipher_prenom is None:
+                self._cipher_prenom = self._build_cipher("prenom", load_prenoms)
             return self._cipher_prenom.decrypt(surrogate)
         if etype == EntityType.COMMUNE:
+            if self._cipher_commune is None:
+                self._cipher_commune = self._build_cipher("commune", load_communes)
             return self._cipher_commune.decrypt(surrogate)
         if etype == EntityType.VOIE:
+            if self._cipher_voie is None:
+                self._cipher_voie = self._build_cipher("voie", load_voies)
             return self._cipher_voie.decrypt(surrogate)
         if etype == EntityType.PLAQUE_SIV:
             return self._cipher_plate.decrypt(surrogate)

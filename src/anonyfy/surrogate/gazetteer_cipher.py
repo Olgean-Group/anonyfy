@@ -26,9 +26,17 @@ les gazetteers réels). Pour n >= 2, un dérangement existe toujours.
 Cache: le dérangement ne dépend que de (key, scope, entity_type, n), pas des
 noms du gazetteer. Un cache de module évite le recalcul quand plusieurs
 ``Vault`` utilisent le même (key, scope).
+
+Phase 27 (OBJ-REC-107): remplacement du dict ``_pos`` par tri + ``bisect``
+(O(log n), zéro dict). Sur 879k noms, le dict ``_pos`` consommait ~220-320 Mo;
+la liste triée ``_cf_names`` + bisect consomme ~30 Mo (les chaînes casefold
+seulement, pas de table de hachage). Le lookup O(log n) reste négligeable
+(~20 comparaisons sur 879k entrées).
 """
 
 from __future__ import annotations
+
+import bisect
 
 from anonyfy.detect.gazetteers.loader import Gazetteer
 from anonyfy.surrogate.permutation import Permutation
@@ -84,7 +92,10 @@ class GazetteerCipher:
     def __init__(self, key: bytes, scope: str, entity_type: str, gazetteer: Gazetteer) -> None:
         # Liste ordonnée canonique: noms triés par casefold (stable, figé D5).
         self._names = sorted((e.name for e in gazetteer), key=str.casefold)
-        self._pos = {name.casefold(): i for i, name in enumerate(self._names)}
+        # Phase 27 OBJ-REC-107: remplace le dict _pos par une liste triée de
+        # casefold + bisect (O(log n), zéro dict). Évite ~220-320 Mo de RAM
+        # sur 879k noms (dict hash table) -> ~30 Mo (liste de chaînes seule).
+        self._cf_names = [n.casefold() for n in self._names]
         n = len(self._names)
 
         # Dérangement (phase 25): permutation sans point fixe. Le dérangement
@@ -104,24 +115,29 @@ class GazetteerCipher:
         self._forward = cached[0]
         self._inverse = cached[1]
 
+    def _index_of(self, cf: str) -> int:
+        """Index de ``cf`` dans la liste triée via bisect (O(log n)), ou -1."""
+        i = bisect.bisect_left(self._cf_names, cf)
+        if i < len(self._cf_names) and self._cf_names[i] == cf:
+            return i
+        return -1
+
     def encrypt(self, name: str) -> str | None:
         """Retourne un substitut plausible du gazetteer, ou None si nom inconnu.
 
         Phase 25: le substitut est garanti différent du clair (dérangement,
         aucun point fixe) pour n >= 2.
         """
-        cf = name.casefold()
-        if cf not in self._pos:
+        idx = self._index_of(name.casefold())
+        if idx < 0:
             return None
-        idx = self._pos[cf]
         return self._names[self._forward[idx]]
 
     def decrypt(self, substitute: str) -> str | None:
         """Retourne le nom clair, ou None si le substitut n'est pas du gazetteer."""
-        cf = substitute.casefold()
-        if cf not in self._pos:
+        sub_idx = self._index_of(substitute.casefold())
+        if sub_idx < 0:
             return None
-        sub_idx = self._pos[cf]
         return self._names[self._inverse[sub_idx]]
 
 
