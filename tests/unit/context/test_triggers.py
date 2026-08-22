@@ -20,8 +20,12 @@ détection/déclencheurs + coquille critère 2 corrigée via .value).
 
 from __future__ import annotations
 
-from anonyfy.detect.context.triggers import TRIGGERS, apply
+import pytest
+
+from anonyfy import Vault
+from anonyfy.detect.context.triggers import EXCLUDED_NOMS, TRIGGERS, apply
 from anonyfy.types import EntityType
+from anonyfy.vault import UnresolvedSpanError
 
 _FAIBLE = 0.6
 _ELEVEE = 0.8
@@ -147,3 +151,109 @@ class TestEdge:
         spans = apply(text)
         for s in spans:
             assert 0 <= s.start < s.end <= len(text)
+
+
+class TestExcludedNomsR1:
+    """Phase 34 — R1 (D34a): ``EXCLUDED_NOMS`` est une liste d'exclusion
+    (casefold) scopée PATRONYME : un token dont le casefold y figure n'est
+    jamais émis comme PATRONYME, quel que soit le chemin (``gazetteer-nom``
+    OU ``context-capture``). Elle ne s'applique pas aux PRENOM (les mots-outils
+    ne sont pas des prénoms)."""
+
+    def test_excluded_noms_contient_la_liste_minimale(self):
+        for mot in (
+            "le", "la", "les", "il", "elle", "nous", "vous", "cette", "ce",
+            "ces", "des", "pour", "sur", "dans", "par", "avec", "sans",
+            "nir", "siret", "siren", "iban", "tva", "rib",
+        ):
+            assert mot in EXCLUDED_NOMS, f"mots-outil/acronyme manquant: {mot!r}"
+
+    def test_excluded_noms_casefold(self):
+        assert all(isinstance(m, str) and m == m.casefold() for m in EXCLUDED_NOMS)
+
+    @pytest.mark.parametrize("mot", ["le", "la", "siret", "iban"])
+    def test_mot_outil_non_emis_patronyme_avec_trigger(self, mot: str) -> None:
+        """« M. Le » ne doit pas émettre PATRONYME « Le » (gazetteer-nom boosté
+        sinon). « M. Siret » ne doit pas émettre PATRONYME (gazetteer-nom OU
+        context-capture)."""
+        spans = apply(f"M. {mot.capitalize()}")
+        assert not any(
+            s.type == EntityType.PATRONYME and s.value.casefold() == mot for s in spans
+        ), f"« {mot} » ne doit jamais être émis comme PATRONYME"
+
+    def test_mot_absent_gazetteer_toujours_capte(self):
+        """Le filtre d'exclusion n'empêche pas la capture d'un vrai nom inconnu
+        des listes par déclencheur (non-régression de la phase 12)."""
+        spans = apply("M. Xyzzqq")
+        noms = [s for s in spans if s.type == EntityType.PATRONYME]
+        assert noms and noms[0].value == "Xyzzqq"
+
+
+class TestCandidatNuR1:
+    """Phase 34 — R1 (D34b/D34c/D34e): un candidat nu (PATRONYME/PRENOM issu du
+    seul gazetteer sans déclencheur, confidence < 0.8, rule_id gazetteer-nom /
+    gazetteer-prenom / context-capture) n'est pas émis en permissive, reste
+    visible en observe (le filtre porte sur le masquage, pas la détection), et
+    lève en strict."""
+
+    @pytest.fixture
+    def vault(self, tmp_path):
+        v = Vault(
+            key=b"0" * 16, scope="s", registry_path=str(tmp_path / "reg.db")
+        )
+        yield v
+        v.close()
+
+    @pytest.fixture
+    def strict_vault(self, tmp_path):
+        v = Vault(
+            key=b"0" * 16,
+            scope="s",
+            policy="strict",
+            registry_path=str(tmp_path / "reg.db"),
+        )
+        yield v
+        v.close()
+
+    def test_nom_nu_non_emis_en_permissive(self, vault):
+        m = vault.mask("Dupont habite ici")
+        assert "Dupont" in m.text, "patronyme nu non masqué attendu en permissive"
+        assert not any(e.type == EntityType.PATRONYME for e in m.entities)
+
+    def test_prenom_nu_non_emis_en_permissive(self, vault):
+        m = vault.mask("Paul est arrivé")
+        assert "Paul" in m.text, "prénom nu non masqué attendu en permissive"
+        assert not any(e.type in (EntityType.PATRONYME, EntityType.PRENOM) for e in m.entities)
+
+    def test_nom_nu_visible_en_observe(self, vault):
+        m = vault.mask("Dupont", observe=True)
+        assert any(s.type == EntityType.PATRONYME for s in m.entities), (
+            "observe doit montrer le candidat nu (filtre au masquage, pas à la détection)"
+        )
+
+    def test_prenom_nu_visible_en_observe(self, vault):
+        m = vault.mask("Paul", observe=True)
+        assert any(s.type in (EntityType.PATRONYME, EntityType.PRENOM) for s in m.entities)
+
+    def test_nom_nu_leve_en_strict(self, strict_vault):
+        with pytest.raises(UnresolvedSpanError):
+            strict_vault.mask("Dupont habite ici")
+
+    def test_prenom_nu_leve_en_strict(self, strict_vault):
+        with pytest.raises(UnresolvedSpanError):
+            strict_vault.mask("Paul est arrivé hier.")
+
+    def test_nom_declenche_reste_masque_en_permissive(self, vault):
+        """Non-régression D34e : un PATRONYME en contexte déclenché (confidence
+        0.9 >= 0.8) reste masqué en permissive."""
+        m = vault.mask("M. Dupont")
+        assert "Dupont" not in m.text
+        assert any(e.type == EntityType.PATRONYME for e in m.entities)
+
+    def test_prenom_declenche_reste_masque_en_permissive(self, vault):
+        """Non-régression D34e : un PRENOM pur en contexte déclenché (« M. Théo »,
+        absent du gazetteer noms) reste masqué en permissive. Seul le prénom nu
+        (sans déclencheur) est filtré, pas le prénom déclenché."""
+        m = vault.mask("M. Théo")
+        assert "Théo" not in m.text
+        assert any(e.type == EntityType.PRENOM for e in m.entities)
