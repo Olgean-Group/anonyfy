@@ -30,7 +30,7 @@ import re
 from anonyfy.detect.gazetteers.loader import load_noms, load_prenoms
 from anonyfy.types import EntityType, Span
 
-__all__ = ["TRIGGERS", "apply"]
+__all__ = ["EXCLUDED_NOMS", "TRIGGERS", "apply"]
 
 #: Déclencheurs contextuels par défaut (PLAN §Phase 12).
 TRIGGERS: tuple[str, ...] = (
@@ -40,6 +40,41 @@ TRIGGERS: tuple[str, ...] = (
     "né(e) le",
     "demeurant",
     "ci-après",
+)
+
+#: Mots-outils et acronymes du domaine exclus du typage PATRONYME (phase 34,
+#: D34a/OBJ-010). Le gazetteer noms (879 421 entrées SIRENE) contient des mots
+#: grammaticaux français (« Le », « La », « Il », « Nous », « Cette »...) qui se
+#: déclenchent sur la seule majuscule d'initiale de phrase (chaque phrase perdait
+#: son premier mot) et des acronymes du domaine (NIR, SIRET, SIREN, IBAN, TVA,
+#: RIB) masqués comme patronymes. Un token dont le casefold est dans cette liste
+#: n'est JAMAIS émis comme PATRONYME, quel que soit le chemin (``gazetteer-nom``
+#: OU ``context-capture``). La liste est scopée PATRONYME : elle ne s'applique
+#: pas aux PRENOM (les mots-outils ne sont pas des prénoms ; le filtrage PRENOM
+#: repose sur l'absence de déclencheur, D34b).
+EXCLUDED_NOMS: frozenset[str] = frozenset(
+    {
+        # Déterminants / pronoms (mots-outils du gazetteer noms).
+        "le", "la", "les", "un", "une", "des", "ce", "cet", "cette", "ces",
+        "il", "elle", "ils", "elles", "je", "nous", "vous",
+        "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses",
+        "notre", "votre", "leur", "leurs",
+        # Prépositions / conjonctions.
+        "pour", "sur", "dans", "par", "avec", "sans", "sous", "vers", "chez",
+        "hors", "selon", "parmi", "contre", "entre", "depuis", "avant",
+        "après", "durant", "dès", "et", "ou", "mais", "donc", "or", "ni",
+        "car", "si", "quand", "lorsque", "comme", "qui", "que", "quoi",
+        "dont", "où",
+        # Adverbes et locutions courantes en initiale de phrase administrative.
+        "tout", "toute", "tous", "toutes", "bien", "très", "plus", "moins",
+        "beaucoup", "peu", "assez", "aussi", "encore", "déjà", "jamais",
+        "souvent", "toujours", "mieux", "enfin", "ensuite", "puis",
+        "pendant", "alors", "voici", "voilà", "cependant", "toutefois",
+        "quant", "heureusement", "merci", "oui", "non", "chaque", "aucun",
+        "aucune", "autre", "autres", "même",
+        # Acronymes du domaine (labels de types structurés, OBJ-010).
+        "nir", "siret", "siren", "iban", "tva", "rib",
+    }
 )
 
 # Confidences (PRD §7 plafond): faible sans déclencheur, élevée avec.
@@ -174,7 +209,12 @@ def apply(
                     confidence=_BOOSTED if near else _BASE,
                 )
             )
-        if key in noms:
+        # Phase 34 — R1 (D34a, OBJ-010): EXCLUDED_NOMS est un filtre global
+        # PATRONYME. Un token dont le casefold est dans la liste n'est JAMAIS
+        # émis comme PATRONYME, quel que soit le chemin (gazetteer-nom ou
+        # context-capture). La liste reste scopée PATRONYME (les PRENOM ne
+        # sont pas concernés).
+        if key in noms and key not in EXCLUDED_NOMS:
             spans.append(
                 Span(
                     start=tok_start,
@@ -185,7 +225,7 @@ def apply(
                     confidence=_BOOSTED if near else _BASE,
                 )
             )
-        if key not in prenoms and key not in noms and near:
+        if key not in prenoms and key not in noms and near and key not in EXCLUDED_NOMS:
             # Nom absent des listes, capté par un déclencheur contextuel.
             spans.append(
                 Span(
