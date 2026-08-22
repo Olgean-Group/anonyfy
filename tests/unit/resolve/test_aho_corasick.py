@@ -159,3 +159,56 @@ class TestRegistryLookupContains:
         r, sub = registry_with_entries
         surrogates = r.iter_surrogates()
         assert str(sub) in surrogates
+
+
+# --- Phase 27: frontières de mot (OBJ-REC-108 non-régression) ---------------
+
+
+class TestWordBoundary:
+    """Phase 27: l'Aho-Corasick ne doit pas matcher un substitut court à
+    l'intérieur d'un mot plus long (ex. « ME » dans « MEGID »). Les hits sont
+    filtrés par frontière de mot: un match ne commence ni ne finit au milieu
+    d'un token de même classe (lettre/digit) que le substitut.
+
+    Cause racine: le gazetteer INSEE complet (879k noms) contient des entrées
+    courtes (1-3 lettres: « M », « ME », « ID ») qui, utilisées comme substituts,
+    matchent par sous-chaîne dans l'Aho-Corasick à l'intérieur de mots non
+    masqués, corrompant le round-trip unmask.
+    """
+
+    def test_substitut_court_ne_match_pas_dans_mot_plus_long(self):
+        """« ME » substitut ne doit pas matcher dans « MEGID » (mot non masqué)."""
+        ac = AhoCorasick.from_surrogates(["ME"])
+        hits = ac.find("BLATTLIN GARCIA LAJEUS MEGID")
+        # « ME » à la position 24 est suivi de « G » (lettre) → pas une frontière.
+        me_hits = [h for h in hits if h.substitute == "ME"]
+        assert me_hits == [], f"« ME » a matché dans « MEGID »: {me_hits}"
+
+    def test_substitut_court_match_à_frontière_de_mot(self):
+        """« ME » substitut matche quand il est un mot standalone (entre espaces)."""
+        ac = AhoCorasick.from_surrogates(["ME"])
+        hits = ac.find("BLATTLIN GARCIA LAJEUS ME FIN")
+        me_hits = [h for h in hits if h.substitute == "ME"]
+        assert len(me_hits) == 1
+        assert me_hits[0].start == 23
+        assert me_hits[0].end == 25
+
+    def test_substitut_digit_ne_match_pas_dans_digit_plus_long(self):
+        """« 42 » substitut ne doit pas matcher dans « 4242 »."""
+        ac = AhoCorasick.from_surrogates(["42"])
+        hits = ac.find("ID 4242 FIN")
+        sub42 = [h for h in hits if h.substitute == "42"]
+        assert sub42 == [], f"« 42 » a matché dans « 4242 »: {sub42}"
+
+    def test_substitut_digit_match_à_frontière(self):
+        """« 42 » substitut matche quand séparé par des espaces."""
+        ac = AhoCorasick.from_surrogates(["42"])
+        hits = ac.find("ID 42 FIN")
+        sub42 = [h for h in hits if h.substitute == "42"]
+        assert len(sub42) == 1
+
+    def test_substitut_long_match_meme_sans_frontière_gauche_digit(self):
+        """Un substitut digit précédé d'une lettre matche (classes différentes)."""
+        ac = AhoCorasick.from_surrogates(["41804261100034"])
+        hits = ac.find("xx41804261100034yy")
+        assert any(h.substitute == "41804261100034" for h in hits)
