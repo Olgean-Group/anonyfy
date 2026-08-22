@@ -81,6 +81,74 @@ class TestApplyCase:
         assert apply_case("bellon", "U") == "BELLON"
 
 
+class TestClassifyCaseHyphen:
+    """classify_case segmente aussi sur les traits d'union (phase 36, B2).
+
+    Un mot composé à trait d'union (ex. commune « Vernois-sur-Mance ») n'est
+    pas un seul mot de casse homogène : les particules (de, sur, les, la, lès…)
+    sont en minuscule entre segments Title Case. Le pattern encode un code par
+    segment, séparé par '-'.
+    """
+
+    def test_particule_lowercase_apres_tiret(self):
+        assert classify_case("Vernois-sur-Mance") == "T-l-T"
+
+    def test_particule_apostrophe_apres_tiret(self):
+        assert classify_case("Léguillac-de-l'Auche") == "T-l-l'T"
+
+    def test_article_elide_apostrophe(self):
+        assert classify_case("Moÿ-de-l'Aisne") == "T-l-l'T"
+
+    def test_tout_majuscule_tirets(self):
+        assert classify_case("BEAUVAIS-LES-BAINS") == "U-U-U"
+
+    def test_title_sans_particule(self):
+        assert classify_case("Dubois-Bellon") == "T-T"
+
+    def test_espace_et_tiret(self):
+        assert classify_case("Saint-Pierre de la Roche") == "T-T:l:l:T"
+
+    def test_apostrophe_mot_unique(self):
+        assert classify_case("L'Auberge") == "T'T"
+        assert classify_case("d'Olonne") == "l'T"
+
+
+class TestApplyCaseHyphen:
+    """apply_case : les particules en minuscule après trait d'union sont
+    restituées telles quelles (phase 36, B2 résidu round-trip).
+
+    Sans le correctif, « Vernois-sur-Mance » était restitué « Vernois-Sur-Mance »
+    (le repli ``title()`` capitalise la lettre après chaque trait d'union).
+    """
+
+    def test_particule_lowercase_restituee(self):
+        assert apply_case("VERNOIS-SUR-MANCE", "T-l-T") == "Vernois-sur-Mance"
+
+    def test_particule_apostrophe_restituee(self):
+        assert apply_case("LÉGUILLAC-DE-L'AUCH", "T-l-l'T") == "Léguillac-de-l'Auch"
+
+    def test_article_elide_restitue(self):
+        assert apply_case("MOŸ-DE-L'AISNE", "T-l-l'T") == "Moÿ-de-l'Aisne"
+
+    def test_apostrophe_mot_unique_restitue(self):
+        assert apply_case("D'OLONNE", "l'T") == "d'Olonne"
+        assert apply_case("L'AUBERGE", "T'T") == "L'Auberge"
+
+    def test_tout_majuscule_restitue(self):
+        assert apply_case("BEAUARD-LES-BAINS", "U-U-U") == "BEAUARD-LES-BAINS"
+
+    def test_title_segments_majuscules(self):
+        assert apply_case("BEAUARD-LES-BAINS", "T-T-T") == "Beauard-Les-Bains"
+
+    def test_pattern_ancien_sans_tiret_retrocompat(self):
+        # Un registre ancien (D24) a stocké un code unique « T » pour un mot à
+        # trait d'union: le repli title() s'applique (comportement d'avant).
+        assert apply_case("VERNOIS-SUR-MANCE", "T") == "Vernois-Sur-Mance"
+
+    def test_espace_et_tiret(self):
+        assert apply_case("SAINT-PIERRE DE LA ROCHE", "T-T:l:l:T") == "Saint-Pierre de la Roche"
+
+
 class TestRegisterCasePattern:
     """register_fpe stocke case_pattern; lookup l'expose."""
 
