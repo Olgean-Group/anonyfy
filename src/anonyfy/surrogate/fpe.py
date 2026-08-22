@@ -20,6 +20,7 @@ Référence: PLAN.md phase 07, ADR 0001 §2/§4/§5, D2, D6, D13.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import hmac
 
@@ -77,7 +78,16 @@ def _tweak_hex(scope: str, key: bytes, counter: int) -> str:
     return hmac.new(key, msg, hashlib.sha256).digest()[:7].hex()
 
 
+@functools.lru_cache(maxsize=128)
 def _cipher(key_hex: str, tweak_hex: str) -> FF3Cipher:
+    """FF3Cipher mis en cache (phase 32 — M4).
+
+    ``FF3Cipher.__init__`` construit un contexte AES (``AES.new``) à chaque
+    appel; pour un Vault donné, clé et tweak (scope fixe, counter=0) sont
+    constants, donc un seul cipher suffit pour tous les SIRET/SIREN/CB d'un
+    même mask. Le FF3Cipher est stateless (ECB: chaque bloc est indépendant),
+    donc réutilisable entre appels ``encrypt``.
+    """
     return FF3Cipher(key_hex, tweak_hex, radix=10)
 
 

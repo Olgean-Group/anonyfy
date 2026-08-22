@@ -18,9 +18,7 @@ __all__ = ["is_valid_luhn", "luhn_checksum"]
 # Traitement par paires (depuis la droite) => moitié d'itérations, lookup table
 # au lieu de calculs par caractère.
 _LUHN_PAIR: tuple[int, ...] = tuple(
-    a + (2 * b if 2 * b <= 9 else 2 * b - 9)
-    for a in range(10)
-    for b in range(10)
+    a + (2 * b if 2 * b <= 9 else 2 * b - 9) for a in range(10) for b in range(10)
 )
 _ORD0 = ord("0")
 

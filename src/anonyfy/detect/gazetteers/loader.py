@@ -64,9 +64,7 @@ class Gazetteer:
         # Permet a _phrase_matches de court-circuiter quand le premier token
         # d'une phrase candidate ne peut demarrer aucune entree du gazetteer
         # (evite ~8 joins + lookups par token non pertinent).
-        self._first_words: frozenset[str] = frozenset(
-            name.split(" ", 1)[0] for name in entries
-        )
+        self._first_words: frozenset[str] = frozenset(name.split(" ", 1)[0] for name in entries)
 
     def __contains__(self, key: str) -> bool:
         return key.casefold() in self._index
