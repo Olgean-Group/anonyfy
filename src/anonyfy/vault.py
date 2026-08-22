@@ -167,6 +167,12 @@ class Vault:
         recherche Aho-Corasick pour retrouver les substituts reformatés par le
         modèle (ex. SIRET groupé par 3, IBAN espacé). Les positions des hits sont
         remappées vers le texte original avant substitution.
+
+        Phase 26 (OBJ-REC-106): les hits chevauchants sont arbitrés par (match
+        exact, longueur décroissante) avant la substitution droite-à-gauche. Un
+        match exact (le texte contient le substitut canonique) gagne sur une
+        variante de casse de même longueur (ex. ``BONY`` texte vs ``Bony``
+        substitut commune). Miroir de l'arbitrage mask (``resolve_overlaps``).
         """
         normalized, offset_map = _normalize_inter_digit_spaces(text)
 
@@ -174,7 +180,11 @@ class Vault:
         hits = ac.find(normalized)
 
         # Mapper les hits vers les positions du texte original et déchiffrer.
-        replacements: list[tuple[int, int, str]] = []
+        # Le tuple inclut is_exact (match == substitute) pour l'arbitrage: un
+        # match exact (le texte contient le substitut canonique) est privilégié
+        # sur une variante de casse (ex. "BONY" texte vs "Bony" substitut
+        # commune dont la variante upper est "BONY").
+        replacements: list[tuple[int, int, str, bool]] = []
         for hit in hits:
             if not self._registry.contains(hit.substitute):
                 continue
@@ -195,12 +205,27 @@ class Vault:
                 clear = reinsert_template(clear, record.format_pattern)
             orig_start = offset_map[hit.start]
             orig_end = offset_map[hit.end - 1] + 1
-            replacements.append((orig_start, orig_end, clear))
+            is_exact = hit.match == hit.substitute
+            replacements.append((orig_start, orig_end, clear, is_exact))
+
+        # Phase 26 (OBJ-REC-106): arbitrer les hits chevauchants. Tri par
+        # (match exact, longueur décroissante): un match exact (le texte
+        # contient le substitut canonique tel quel) gagne sur une variante de
+        # casse de même longueur; le hit le plus long gagne les overlaps en
+        # général. Miroir de l'arbitrage mask (resolve_overlaps): sans cet
+        # arbitrage, un substitut préfixe d'un autre (ex. "BON" dans "BONY")
+        # ou une variante de casse (ex. "Bony" vs "BONY") produirait des hits
+        # chevauchants et la substitution se marcherait dessus (B2b).
+        replacements.sort(key=lambda r: (r[3], r[1] - r[0]), reverse=True)
+        resolved: list[tuple[int, int, str, bool]] = []
+        for start, end, clear, is_exact in replacements:
+            if not any(start < e and s < end for s, e, _, _ in resolved):
+                resolved.append((start, end, clear, is_exact))
 
         # Substitution de droite à gauche pour préserver les offsets.
-        replacements.sort(key=lambda x: x[0], reverse=True)
+        resolved.sort(key=lambda x: x[0], reverse=True)
         result = text
-        for start, end, clear in replacements:
+        for start, end, clear, _ in resolved:
             result = result[:start] + clear + result[end:]
         return result
 

@@ -37,14 +37,21 @@ def classify_case(text: str) -> str:
     return ":".join(_classify_word(w) for w in words)
 
 
-def _apply_word(word_uc: str, code: str) -> str:
-    """Applique le code de casse à un mot majuscule."""
+def _apply_word(word: str, code: str) -> str:
+    """Applique le code de casse à un mot.
+
+    Normalise le mot en majuscule d'abord: le gazetteer communes est en Title
+    Case (ex. ``Vauchassis``), le gazetteer patronymes est en majuscule
+    (ex. ``BELLON``). Quelle que soit la forme d'entrée, le code ``U`` produit un
+    mot majuscule, ``l`` un mot minuscule, ``T`` un mot Title Case.
+    """
+    upper = word.upper()
     if code == "U":
-        return word_uc
+        return upper
     if code == "l":
-        return word_uc.lower()
+        return upper.lower()
     # T: Title Case
-    return word_uc.title()
+    return upper.title()
 
 
 def apply_case(gazetteer_name_uc: str, pattern: str) -> str:
