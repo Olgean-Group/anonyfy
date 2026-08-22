@@ -127,8 +127,8 @@ class TestMigrationV1V2:
         assert record2.case_pattern == "T:T"
         reg.close()
 
-    def test_schema_version_actuel_est_2(self):
-        assert CURRENT_SCHEMA_VERSION == 2
+    def test_schema_version_actuel_est_3(self):
+        assert CURRENT_SCHEMA_VERSION == 3
 
 
 class TestFlagNonClair:
