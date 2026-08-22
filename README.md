@@ -70,6 +70,16 @@ hors ligne.
 
 ---
 
+## Migration (phase 27)
+
+Les registres créés avant la phase 27 (gazetteer 5k noms) sont
+**incompatibles** avec le gazetteer INSEE complet (879k noms). À la première
+ouverture, `GazetteerVersionMismatch` est levée. Supprimer les registres
+obsolètes (`rm ~/.anonyfy/registries/*.db`) ou exporter les données avant
+migration.
+
+---
+
 ## Couverture de détection (v1)
 
 Les identifiants structurés sont traités par expression régulière **plus validation
