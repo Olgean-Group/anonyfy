@@ -5,7 +5,7 @@ Inspecte le contenu des artefacts de ``dist/`` (sdist ``.tar.gz`` + wheel
 ``.whl``) et quitte avec code 1 si un fichier ou chemin interdit s'y trouve.
 
 Fichiers/chemins interdits dans une distribution anonyfy (état local de
-pilotage, sauvegardes, bytecode, corpus réel RGPD):
+pilotage, sauvegardes, bytecode, corpus réel RGPD, sources gazetteers):
 
   - ``.olgenius/``      (état de pilotage Olgenius)
   - ``resume.md``       (mémoire de session)
@@ -13,6 +13,9 @@ pilotage, sauvegardes, bytecode, corpus réel RGPD):
   - ``corpus_real/``    (corpus réel RGPD, jamais dans le dépôt)
   - ``__pycache__/``    (bytecode)
   - ``*.pyc``           (bytecode)
+  - ``raw/``            (sources CSV gazetteers en clair, inutiles à l'exécution
+                        — seuls les ``.csv.gz`` compressés de ``data/`` sont
+                        embarqués; décision phase 31/M3, évite un doublon ~1 Mo)
 
 ``.gitignore`` est intentionnellement autorisé dans la sdist (standard PyPA,
 hatchling ``force_include`` des fichiers d'exclusion VCS, inoffensif: patterns
@@ -50,6 +53,7 @@ FORBIDDEN: tuple[str, ...] = (
     "corpus_real/",
     "__pycache__/",
     "*.pyc",
+    "raw/",
 )
 
 
