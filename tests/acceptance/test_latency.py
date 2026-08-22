@@ -31,6 +31,11 @@ _PARA = (
 )
 _TEXT = (_PARA * (10_000 // len(_PARA) + 1))[:10_000]
 
+# Texte dense du critère d'acceptation 2 (phase 32): ~250 identifiants SIRET +
+# patronymes dans 10 000 caractères. Pire cas réel (administratif compact).
+_DENSE_PARA = "M. Jean Dupont, SIRET 73282932000033. "
+_DENSE_TEXT = (_DENSE_PARA * 400)[:10_000]
+
 
 @pytest.fixture
 def vault(tmp_path):
@@ -47,5 +52,20 @@ def test_mask_10k_chars_under_50ms(vault):
     for _ in range(_RUNS):
         start = time.perf_counter()
         vault.mask(_TEXT)
+        best = min(best, (time.perf_counter() - start) * 1000.0)
+    assert best < _TARGET_MS, f"latence {best:.2f} ms >= cible {_TARGET_MS} ms"
+
+
+def test_mask_10k_dense_under_50ms(vault):
+    """mask() sur 10 000 caractères denses (~250 entités) < 50 ms.
+
+    Pire cas réel du critère d'acceptation 2 (phase 32): document administratif
+    compact riche en SIRET et patronymes. Cible PRD §6.
+    """
+    vault.mask(_DENSE_TEXT)  # échauffement
+    best = float("inf")
+    for _ in range(_RUNS):
+        start = time.perf_counter()
+        vault.mask(_DENSE_TEXT)
         best = min(best, (time.perf_counter() - start) * 1000.0)
     assert best < _TARGET_MS, f"latence {best:.2f} ms >= cible {_TARGET_MS} ms"
