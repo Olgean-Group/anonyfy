@@ -18,6 +18,8 @@ Le démasquage est porté par ``Vault`` (Aho-Corasick + registre + decrypt).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 import warnings
 from dataclasses import dataclass
@@ -39,6 +41,7 @@ from anonyfy.surrogate.case_pattern import classify_case
 from anonyfy.surrogate.date_cipher import DateCipher
 from anonyfy.surrogate.email_cipher import EmailCipher
 from anonyfy.surrogate.gazetteer_cipher import GazetteerCipher
+from anonyfy.surrogate.permutation import Permutation
 from anonyfy.surrogate.plate_cipher import PlateCipher
 from anonyfy.surrogate.reference_cipher import ReferenceCipher
 from anonyfy.surrogate.registry import ScopeRegistry
@@ -99,6 +102,29 @@ _FPE_RUN_DETECTORS: tuple[tuple[EntityType, object, str], ...] = (
     (EntityType.TELEPHONE, phone.detect, "phone-format"),
     (EntityType.NIR, nir.detect, "nir-mod97"),
 )
+
+
+# Phase 30 — S4: Permutation keyée sur [0, 100000) pour les CP (5 chiffres).
+# L'indice chiffré est stocké dans ``clear_index`` du registre; le substitut
+# (5 chiffres du département de la commune substituée) est un « handle » unique.
+# Au unmask, ``clear_index`` -> ``Permutation.decrypt`` -> CP clair.
+_CP_DOMAIN = 100000
+_CP_PERM_CACHE: dict[tuple[bytes, str], Permutation] = {}
+
+
+def _cp_permutation(key: bytes, scope: str) -> Permutation:
+    """Permutation keyée sur [0, 100000) pour le chiffrement réversible des CP."""
+    cache_key = (bytes(key), scope)
+    perm = _CP_PERM_CACHE.get(cache_key)
+    if perm is None:
+        perm = Permutation(key=key, scope=scope, entity_type="code_postal", n=_CP_DOMAIN)
+        _CP_PERM_CACHE[cache_key] = perm
+    return perm
+
+
+def _cp_prefix(dept: str) -> str:
+    """Préfixe CP (2 chiffres) d'un département. Corse 2A/2B -> « 20 »."""
+    return "20" if dept in ("2A", "2B") else dept
 
 
 class Engine:
@@ -164,7 +190,24 @@ class Engine:
             return MaskedText(text=text, entities=entities)
 
         substitutions: list[tuple[int, int, str, EntityType]] = []
+        # Phase 30 — S4: pré-calcul des substituts CP composites (dépendent du
+        # département de la commune substituée). Le CP n'est pas chiffré par
+        # ``_encrypt_span`` mais par une Permutation dont l'indice chiffré est
+        # stocké dans ``clear_index`` du registre (réversibilité).
+        cp_data = self._compute_cp_surrogates(resolved)
         for span in resolved:
+            if span.type == EntityType.CODE_POSTAL and id(span) in cp_data:
+                surrogate, encrypted_idx = cp_data[id(span)]
+                if surrogate is None:
+                    continue
+                self._registry.register_fpe(
+                    span.type.value,
+                    span.value,
+                    surrogate=surrogate,
+                    clear_index=encrypted_idx,
+                )
+                substitutions.append((span.start, span.end, surrogate, span.type))
+                continue
             substitute = self._encrypt_span(span)
             if substitute is None:
                 continue
@@ -254,7 +297,93 @@ class Engine:
             return sub
         if etype == EntityType.DATE:
             return self._cipher_date.encrypt(span.value)
+        # CODE_POSTAL: géré par le pré-pass ``_compute_cp_surrogates`` dans mask;
+        # tombe sur le return None par défaut (pas de cipher direct).
         return None
+
+    def _compute_cp_surrogates(self, resolved: list[Span]) -> dict[int, tuple[str | None, int]]:
+        """Phase 30 — S4: pré-calcul des substituts CP composites.
+
+        Pour chaque CP couplé à une commune, le substitut est un CP du département
+        de la commune substituée (cohérence, PRD §7). L'indice chiffré (Permutation
+        sur [0, 100000)) est stocké dans ``clear_index`` du registre pour la
+        réversibilité: au unmask, ``clear_index`` -> ``Permutation.decrypt`` -> CP clair.
+
+        Pour un CP après déclencheur sans commune, un département aléatoire est
+        choisi (HMAC-déterministe), différent du département original pour éviter
+        la fuite.
+
+        Retourne ``{id(span): (surrogate, encrypted_idx)}``. Le surrogate est un
+        CP à 5 chiffres du bon département (ou None si non masquable).
+        """
+        out: dict[int, tuple[str | None, int]] = {}
+        cps = [s for s in resolved if s.type == EntityType.CODE_POSTAL]
+        if not cps:
+            return out
+        communes = [s for s in resolved if s.type == EntityType.COMMUNE]
+        gaz = load_communes()
+        perm = _cp_permutation(self._key, self._scope)
+        for cp in cps:
+            encrypted_idx = perm.encrypt(int(cp.value))
+            # Trouver la commune couplée la plus proche.
+            dept = self._coupled_dept(cp, communes, gaz)
+            if dept is None:
+                # Trigger-only: dept aléatoire (HMAC), != dept original.
+                dept = self._random_dept(cp.value)
+            prefix = _cp_prefix(dept)
+            suffix_len = 5 - len(prefix)
+            base_suffix = encrypted_idx % (10**suffix_len)
+            # Sondage linéaire pour éviter collisions et point fixe.
+            surrogate = None
+            for probe in range(10**suffix_len):
+                suffix = (base_suffix + probe) % (10**suffix_len)
+                cand = prefix + str(suffix).zfill(suffix_len)
+                if cand == cp.value:
+                    continue  # éviter point fixe
+                if self._registry.contains(cand):
+                    continue  # déjà attribué à un autre clair
+                surrogate = cand
+                break
+            if surrogate is None:
+                # Tous les candidats sont pris ou points fixes (improbable).
+                surrogate = prefix + str(base_suffix).zfill(suffix_len)
+            out[id(cp)] = (surrogate, encrypted_idx)
+        return out
+
+    def _coupled_dept(self, cp: Span, communes: list[Span], gaz) -> str | None:
+        """Département de la commune substituée couplée au CP, ou None.
+
+        Chiffre la commune pour obtenir son substitut, puis lit le département
+        du substitut dans le gazetteer. Retourne None si aucune commune couplée
+        ou si le substitut est inconnu du gazetteer.
+        """
+        if not communes:
+            return None
+        # Commune la plus proche du CP (avant ou après).
+        best: Span | None = None
+        best_gap = 10**9
+        for c in communes:
+            gap = max(c.start - cp.end, cp.start - c.end)
+            if 0 <= gap < best_gap:
+                best = c
+                best_gap = gap
+        if best is None:
+            return None
+        commune_sub = self._encrypt_span(best)
+        if commune_sub is None or commune_sub.casefold() not in gaz:
+            return None
+        return gaz[commune_sub.casefold()].departement
+
+    def _random_dept(self, cp_clear: str) -> str:
+        """Département aléatoire (HMAC-déterministe), != dept du CP clair."""
+        original_dept = cp_clear[:2] if len(cp_clear) >= 2 else ""
+        msg = self._scope.encode("utf-8") + b"\x00code_postal_dept\x00" + cp_clear.encode("utf-8")
+        digest = hmac.new(self._key, msg, hashlib.sha256).digest()
+        dept_num = int.from_bytes(digest[:2], "big") % 96 + 1  # 01-96
+        dept = f"{dept_num:02d}"
+        if dept == original_dept:
+            dept = f"{(dept_num % 95) + 1:02d}"
+        return dept
 
     def decrypt_surrogate(self, etype: EntityType, surrogate: str) -> str | None:
         """Déchiffre un substitut selon son type (pour Vault.unmask)."""
@@ -294,6 +423,16 @@ class Engine:
             return self._cipher_email.decrypt(surrogate, mode)
         if etype == EntityType.DATE:
             return self._cipher_date.decrypt(surrogate)
+        if etype == EntityType.CODE_POSTAL:
+            # Phase 30 — S4: l'indice chiffré (Permutation) est stocké dans
+            # ``clear_index`` du registre. Le substitut (5 chiffres du dept de
+            # la commune substituée) est un « handle » unique; la réversibilité
+            # passe par ``clear_index`` -> ``Permutation.decrypt`` -> CP clair.
+            record = self._registry.lookup(surrogate)
+            if record is None:
+                return None
+            perm = _cp_permutation(self._key, self._scope)
+            return str(perm.decrypt(record.clear_index)).zfill(5)
         return None
 
     def detect(self, text: str) -> list[Span]:

@@ -22,6 +22,7 @@ import re
 
 from anonyfy.detect.context.triggers import TRIGGERS, _find_trigger_spans, _near_trigger
 from anonyfy.detect.gazetteers.loader import load_communes, load_voies
+from anonyfy.detect.validators import cp as cp_val
 from anonyfy.types import EntityType, Span
 
 __all__ = ["detect", "detect_communes", "detect_voies"]
@@ -32,6 +33,16 @@ _BOOSTED = 0.9
 
 # Fenêtre de proximité (caractères) entre déclencheur et candidat.
 _WINDOW = 40
+
+# Phase 30 — S4: déclencheurs CP (OBJ-REC-109). Un CP est masqué s'il est
+# adjacent à une commune détectée OU précédé d'un de ces déclencheurs.
+_CP_TRIGGERS: tuple[str, ...] = ("à ", "demeurant à ", "habite à ")
+
+# Fenêtre de proximité entre un CP et une commune (caractères de l'interspace).
+_CP_COMMUNE_WINDOW = 15
+
+# Fenêtre entre la fin d'un déclencheur CP et le début du CP.
+_CP_TRIGGER_WINDOW = 10
 
 # Token: lettres (accentuées), apostrophes ' et ’, tirets internes. Les chiffres
 # et la ponctuation séparante ne sont pas des tokens (ex. le "12" et "75001" ne
@@ -70,12 +81,16 @@ def detect(
     triggers: tuple[str, ...] | list[str] | None = None,
     window: int = _WINDOW,
 ) -> list[Span]:
-    """Détecte les communes et voies dans ``text`` par match gazetteer.
+    """Détecte les communes, voies et CP couplés dans ``text`` par match gazetteer.
 
-    Renvoie une liste de ``Span`` (``EntityType.COMMUNE`` / ``EntityType.VOIE``)
-    avec confiance faible (gazetteer seul) ou élevée (gazetteer + déclencheur).
-    Les candidats chevauchants (commune incluse dans une voie plus longue, etc.)
-    ne sont pas résolus ici; l'arbitrage est du ressort de ``resolve_overlaps``.
+    Renvoie une liste de ``Span`` (``EntityType.COMMUNE`` / ``EntityType.VOIE`` /
+    ``EntityType.CODE_POSTAL``) avec confiance faible (gazetteer seul) ou élevée
+    (gazetteer + déclencheur, ou CP couplé). Les candidats chevauchants ne sont
+    pas résolus ici; l'arbitrage est du ressort de ``resolve_overlaps``.
+
+    Phase 30 — S4 (OBJ-REC-109): les CP (5 chiffres) ne sont émis QUE s'ils
+    sont adjacents à une commune détectée ou précédés d'un déclencheur CP
+    (``à ``, ``demeurant à ``, ``habite à ``). Un nombre isolé n'est pas émis.
     """
     if not text:
         return []
@@ -128,6 +143,10 @@ def detect(
             i = _token_index_after(tokens, end)
         else:
             i += 1
+
+    # Phase 30 — S4: couplage CP/commune (OBJ-REC-109).
+    commune_spans = [s for s in spans if s.type == EntityType.COMMUNE]
+    spans.extend(_detect_coupled_cps(text, commune_spans))
     return spans
 
 
@@ -155,3 +174,78 @@ def detect_voies(
 ) -> list[Span]:
     """Détecte uniquement les voies (sous-ensemble de ``detect``)."""
     return [s for s in detect(text, triggers, window) if s.type == EntityType.VOIE]
+
+
+# --- Phase 30 — S4: couplage CP / commune (OBJ-REC-109) -------------------
+
+
+def _cp_near_commune(
+    cp_start: int,
+    cp_end: int,
+    commune_spans: list[Span],
+    window: int = _CP_COMMUNE_WINDOW,
+) -> bool:
+    """True si le CP est adjacent (<= ``window`` caractères) à une commune.
+
+    L'adjacence est mesurée par l'écart entre le CP et la commune (avant ou
+    après). Un CP collé à une commune (« 16000 Angoulême ») a un écart de 1
+    (l'espace); on accepte jusqu'à ``window`` caractères d'interstice.
+    """
+    for c in commune_spans:
+        gap = max(c.start - cp_end, cp_start - c.end)
+        if 0 <= gap <= window:
+            return True
+    return False
+
+
+def _cp_after_trigger(
+    cp_start: int,
+    text: str,
+    triggers: tuple[str, ...] = _CP_TRIGGERS,
+    window: int = _CP_TRIGGER_WINDOW,
+) -> bool:
+    """True si un déclencheur CP se termine dans ``window`` chars avant le CP."""
+    for trigger in triggers:
+        if not trigger:
+            continue
+        search_from = 0
+        while True:
+            idx = text.find(trigger, search_from)
+            if idx < 0:
+                break
+            trigger_end = idx + len(trigger)
+            if 0 <= cp_start - trigger_end <= window:
+                return True
+            search_from = idx + 1
+    return False
+
+
+def _detect_coupled_cps(
+    text: str,
+    commune_spans: list[Span],
+) -> list[Span]:
+    """Détecte les CP couplés à une commune ou après un déclencheur (OBJ-REC-109).
+
+    Un CP (5 chiffres) n'est émis que s'il est adjacent à une commune détectée
+    OU précédé d'un déclencheur CP (``à ``, ``demeurant à ``, ``habite à ``).
+    Les CP isolés ne sont pas émis (anti faux positifs sur nombres à 5 chiffres).
+    """
+    raw_cps = cp_val.detect(text)
+    coupled: list[Span] = []
+    for cp in raw_cps:
+        near_commune = _cp_near_commune(cp.start, cp.end, commune_spans)
+        triggered = _cp_after_trigger(cp.start, text)
+        if not near_commune and not triggered:
+            continue
+        rule = "cp-commune" if near_commune else "cp-trigger"
+        coupled.append(
+            Span(
+                start=cp.start,
+                end=cp.end,
+                type=EntityType.CODE_POSTAL,
+                value=cp.value,
+                rule_id=rule,
+                confidence=_BOOSTED,
+            )
+        )
+    return coupled

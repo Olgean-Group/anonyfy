@@ -19,14 +19,16 @@ Modules de format (sans clé arithmétique, confiance 0.9):
   - date: date calendaire (JJ/MM/AAAA via datetime.date);
   - email: email (syntaxe RFC simple);
   - reference: référence de dossier (regex configurable par le client).
+  - cp: code postal français (5 chiffres, couplage commune/déclencheur phase 30).
 
-Référence: PLAN.md phases 05 et 06, PRD §7.
+Référence: PLAN.md phases 05, 06 et 30, PRD §7.
 """
 
 from __future__ import annotations
 
 __all__ = [
     "cb",
+    "cp",
     "date",
     "email",
     "iban",

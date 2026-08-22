@@ -374,6 +374,7 @@ class ScopeRegistry:
         surrogate: str,
         case_pattern: str | None = None,
         format_pattern: str | None = None,
+        clear_index: int = 0,
     ) -> str:
         """Enregistre un substitut FPE pré-calculé (grands domaines, phase 07/08).
 
@@ -394,6 +395,12 @@ class ScopeRegistry:
         le clair compact. ``None`` si le span n'avait pas de séparateurs. Ne
         contient JAMAIS le clair (invariant 1): uniquement des marqueurs de
         position et les séparateurs littéraux.
+
+        ``clear_index`` (phase 30, S4): indice entier optionnel pour les types
+        non réversibles par cipher (ex. CODE_POSTAL composite dont le substitut
+        dépend du département de la commune substituée). Stocke l'indice chiffré
+        (Permutation) du clair, JAMAIS le clair lui-même (invariant 1). Défaut 0
+        pour les types FPE classiques (rétrocompatible).
 
         Idempotent: un même (entity_type, clear_value) renvoie le substitut déjà
         enregistré. Lève ``RegistryError`` si le substitut est déjà attribué à un
@@ -417,7 +424,9 @@ class ScopeRegistry:
                 raise RegistryError(
                     f"substitut FPE en collision avec un clair distinct: {surrogate!r}"
                 )
-            self._insert(entity_type, surrogate, 0, clear_hmac, case_pattern, format_pattern)
+            self._insert(
+                entity_type, surrogate, clear_index, clear_hmac, case_pattern, format_pattern
+            )
             self._hmac_to_surrogate[(entity_type, clear_hmac)] = surrogate
             self._used_surrogates.add(surrogate)
             return surrogate
