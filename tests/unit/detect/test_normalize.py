@@ -179,8 +179,7 @@ class TestTemplate:
         r = runs[0]
         tmpl = build_template(text, r, 0, len(r.projection))
         assert (
-            reinsert_template("FR761234567890123456789", tmpl)
-            == "FR76 123 456 789 012 345 678 9"
+            reinsert_template("FR761234567890123456789", tmpl) == "FR76 123 456 789 012 345 678 9"
         )
 
     def test_template_sans_separateur_renvoie_none(self):
