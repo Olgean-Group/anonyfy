@@ -33,6 +33,7 @@ class EntityType(Enum):
     PRENOM = "PRENOM"
     COMMUNE = "COMMUNE"
     VOIE = "VOIE"
+    CODE_POSTAL = "CODE_POSTAL"
 
     @classmethod
     def coerce(cls, value: EntityType | str) -> EntityType:
