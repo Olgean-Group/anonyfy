@@ -1,7 +1,7 @@
 [project]
 name = "anonyfy"
 version = "0.1.0"
-description = "Anonyfy - anonymisation réversible par pseudonymisation (FPE + registre de scope)"
+description = "Pseudonymisation réversible et déterministe des données personnelles françaises avant envoi à un LLM."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
