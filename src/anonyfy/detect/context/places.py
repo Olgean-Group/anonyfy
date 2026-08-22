@@ -20,7 +20,12 @@ from __future__ import annotations
 
 import re
 
-from anonyfy.detect.context.triggers import TRIGGERS, _find_trigger_spans, _near_trigger
+from anonyfy.detect.context.triggers import (
+    TRIGGERS,
+    _find_trigger_spans,
+    _near_trigger,
+    _prepare_triggers,
+)
 from anonyfy.detect.gazetteers.loader import load_communes, load_voies
 from anonyfy.detect.validators import cp as cp_val
 from anonyfy.types import EntityType, Span
@@ -55,20 +60,26 @@ _MAX_WORDS = 8
 
 
 def _phrase_matches(
-    text: str,
     tokens: list[tuple[int, int, str]],
+    cfold_tokens: list[str],
     start_idx: int,
     gazetteer,
 ) -> tuple[int, int, str] | None:
     """Cherche la plus longue phrase (tokens consécutifs) présente dans le
     gazetteer à partir de ``start_idx``. Renvoie (start, end, matched_value) ou
     None. Les tokens sont joints par une espace et normalisés par casefold.
+
+    ``cfold_tokens`` est la version pré-casefold des valeurs (calculée une fois
+    par ``detect``) pour éviter de recasefold la phrase entière à chaque
+    extension.
     """
     best: tuple[int, int, str] | None = None
+    cfold_words: list[str] = []
     words: list[str] = []
     for k in range(start_idx, min(start_idx + _MAX_WORDS, len(tokens))):
         words.append(tokens[k][2])
-        phrase = " ".join(words).casefold()
+        cfold_words.append(cfold_tokens[k])
+        phrase = " ".join(cfold_words)
         if phrase in gazetteer:
             best = (tokens[start_idx][0], tokens[k][1], " ".join(words))
         # Continue à étendre même après un match: le nom le plus long gagne
@@ -101,18 +112,20 @@ def detect(
     communes = load_communes()
     voies = load_voies()
     trigger_spans = _find_trigger_spans(text, triggers)
+    trig_starts, _trig_ends, trig_max_te = _prepare_triggers(trigger_spans)
 
     tokens: list[tuple[int, int, str]] = [
         (m.start(), m.end(), m.group(0)) for m in _TOKEN_RE.finditer(text)
     ]
+    cfold_tokens = [v.casefold() for (_, _, v) in tokens]
 
     spans: list[Span] = []
     i = 0
     while i < len(tokens):
         # Voie d'abord (souvent plus long): on cherche la plus longue phrase
         # dans chaque gazetteer et on garde la plus longue des deux.
-        voie = _phrase_matches(text, tokens, i, voies)
-        commune = _phrase_matches(text, tokens, i, communes)
+        voie = _phrase_matches(tokens, cfold_tokens, i, voies)
+        commune = _phrase_matches(tokens, cfold_tokens, i, communes)
         chosen: tuple[int, int, str, EntityType] | None = None
         if voie is not None and commune is not None:
             if (voie[1] - voie[0]) >= (commune[1] - commune[0]):
@@ -126,7 +139,7 @@ def detect(
 
         if chosen is not None:
             start, end, value, etype = chosen
-            near = _near_trigger(start, end, trigger_spans, window)
+            near = _near_trigger(start, end, trig_starts, trig_max_te, window)
             rule = "gazetteer-voie" if etype == EntityType.VOIE else "gazetteer-commune"
             spans.append(
                 Span(

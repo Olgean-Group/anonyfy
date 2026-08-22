@@ -24,6 +24,7 @@ Référence: PLAN.md phase 12, critères 580-584. Décision D20.
 
 from __future__ import annotations
 
+import bisect
 import re
 
 from anonyfy.detect.gazetteers.loader import load_noms, load_prenoms
@@ -70,40 +71,63 @@ def _find_trigger_spans(text: str, triggers: tuple[str, ...]) -> list[tuple[int,
     return positions
 
 
+def _prepare_triggers(
+    trigger_spans: list[tuple[int, int]],
+) -> tuple[list[int], list[int], list[int]]:
+    """Précalcule les structures triées pour les tests de chevauchement/proximité.
+
+    Renvoie (starts, ends, max_te_prefix) triés par ``start`` croissant.
+    ``max_te_prefix[j]`` = max des ``end`` des ``j`` premiers triggers (0 pour
+    j=0), utilisé pour répondre en O(log n) aux tests de chevauchement et de
+    proximité sans parcourir tous les triggers.
+    """
+    if not trigger_spans:
+        return [], [], [0]
+    ordered = sorted(trigger_spans)
+    starts = [s for s, _ in ordered]
+    ends = [e for _, e in ordered]
+    max_te_prefix = [0]
+    cur = 0
+    for e in ends:
+        if e > cur:
+            cur = e
+        max_te_prefix.append(cur)
+    return starts, ends, max_te_prefix
+
+
 def _overlaps_trigger(
     tok_start: int,
     tok_end: int,
-    trigger_spans: list[tuple[int, int]],
+    trig_starts: list[int],
+    trig_max_te_prefix: list[int],
 ) -> bool:
-    """True si le token chevauche une occurrence de déclencheur.
+    """True si le token chevauche une occurrence de déclencheur (O(log n)).
 
-    Évite de capturer comme candidat la partie lettrée d'un déclencheur lui-même
-    (ex. le « M » de « M. », le « Mme » de « Mme »).
+    Un chevauchement existe ssi un trigger a ``start < tok_end`` ET ``end >
+    tok_start``. Les triggers étant triés par ``start``, ``bisect`` isole ceux à
+    gauche (start < tok_end) et ``max_te_prefix`` borne leur plus grand ``end``.
     """
-    for ts, te in trigger_spans:
-        if tok_start < te and ts < tok_end:
-            return True
-    return False
+    j = bisect.bisect_left(trig_starts, tok_end)
+    return j > 0 and trig_max_te_prefix[j] > tok_start
 
 
 def _near_trigger(
     tok_start: int,
     tok_end: int,
-    trigger_spans: list[tuple[int, int]],
+    trig_starts: list[int],
+    trig_max_te_prefix: list[int],
     window: int,
 ) -> bool:
-    """True si un déclencheur est à ``window`` caractères ou moins du token."""
-    for ts, te in trigger_spans:
-        if tok_end <= ts:
-            if ts - tok_end <= window:
-                return True
-        elif te <= tok_start:
-            if tok_start - te <= window:
-                return True
-        else:
-            # Chevauchement (token sur le déclencheur, ex. « M. » sur « M »).
-            return True
-    return False
+    """True si un déclencheur est à ``window`` caractères ou moins du token (O(log n)).
+
+    Côté droit (start >= tok_end): near ssi un start <= tok_end + window.
+    Côté gauche (start < tok_end): near ssi un end > tok_start - window (cela
+    couvre le chevauchement et la proximité avant).
+    """
+    j = bisect.bisect_left(trig_starts, tok_end)
+    if j < len(trig_starts) and trig_starts[j] <= tok_end + window:
+        return True
+    return j > 0 and trig_max_te_prefix[j] > tok_start - window
 
 
 def apply(
@@ -126,6 +150,7 @@ def apply(
     prenoms = load_prenoms()
     noms = load_noms()
     trigger_spans = _find_trigger_spans(text, triggers)
+    trig_starts, _trig_ends, trig_max_te = _prepare_triggers(trigger_spans)
 
     spans: list[Span] = []
     for m in _TOKEN_RE.finditer(text):
@@ -134,9 +159,9 @@ def apply(
         tok_start, tok_end = m.start(), m.end()
         # Un token chevauchant un déclencheur (ex. « M » dans « M. ») est la
         # partie lettrée du déclencheur lui-même, pas un candidat nom.
-        if _overlaps_trigger(tok_start, tok_end, trigger_spans):
+        if _overlaps_trigger(tok_start, tok_end, trig_starts, trig_max_te):
             continue
-        near = _near_trigger(tok_start, tok_end, trigger_spans, window)
+        near = _near_trigger(tok_start, tok_end, trig_starts, trig_max_te, window)
 
         if key in prenoms:
             spans.append(
