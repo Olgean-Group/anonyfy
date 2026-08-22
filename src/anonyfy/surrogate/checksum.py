@@ -15,6 +15,8 @@ from anonyfy.detect.validators.mod97 import iban_mod97, nir_control_key
 
 __all__ = ["iban_check_digits", "luhn_check_digit", "nir_key", "tva_key"]
 
+_ORD0 = ord("0")
+
 
 def luhn_check_digit(body: str) -> int:
     """Renvoie le chiffre de contrôle de Luhn à appendre à `body` pour que la
@@ -24,20 +26,21 @@ def luhn_check_digit(body: str) -> int:
     """
     if not body or not body.isdigit():
         raise ValueError(f"corps non numérique ou vide: {body!r}")
-    for c in range(10):
-        total = 0
-        candidate = body + str(c)
-        for i, ch in enumerate(reversed(candidate)):
-            n = int(ch)
-            if i % 2 == 1:
-                n *= 2
-                if n > 9:
-                    n -= 9
-            total += n
-        if total % 10 == 0:
-            return c
-    # Mathématiquement inaccessible (10 chiffres testés sur un modulo 10).
-    raise RuntimeError("aucune clé de Luhn trouvée")
+    # ``c`` sera appendu en fin: dans reversed(body+c), c occupe la position 0
+    # (non doublé) et le dernier chiffre de ``body`` la position 1 (doublé). On
+    # calcule donc la somme de Luhn de ``body`` avec parité décalée (premier
+    # chiffre depuis la droite doublé) puis c = (-total) % 10. Un seul passage
+    # au lieu de 10 candidats.
+    rev = body[::-1]
+    total = 0
+    for i, ch in enumerate(rev):
+        n = ord(ch) - _ORD0
+        if i % 2 == 0:  # position i+1 dans body+c (impair => doublé)
+            n *= 2
+            if n > 9:
+                n -= 9
+        total += n
+    return (-total) % 10
 
 
 def nir_key(base13: str) -> str:

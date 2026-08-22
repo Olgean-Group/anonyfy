@@ -60,6 +60,11 @@ class Gazetteer:
 
     def __init__(self, entries: dict[str, GazetteerEntry]) -> None:
         self._index = entries
+        # Phase 32 — M4: set des premiers mots (casefold) de toutes les entrees.
+        # Permet a _phrase_matches de court-circuiter quand le premier token
+        # d'une phrase candidate ne peut demarrer aucune entree du gazetteer
+        # (evite ~8 joins + lookups par token non pertinent).
+        self._first_words: frozenset[str] = frozenset(name.split(" ", 1)[0] for name in entries)
 
     def __contains__(self, key: str) -> bool:
         return key.casefold() in self._index
@@ -72,6 +77,15 @@ class Gazetteer:
 
     def __iter__(self):
         return iter(self._index.values())
+
+    @property
+    def first_words(self) -> frozenset[str]:
+        """Set des premiers mots (casefold) de toutes les entrees.
+
+        Préfiltre de préfixe pour ``_phrase_matches``: si un token n'est pas un
+        premier mot possible, aucune phrase commençant par lui ne peut matcher.
+        """
+        return self._first_words
 
 
 # --- chargement paresseux avec cache en mémoire ---

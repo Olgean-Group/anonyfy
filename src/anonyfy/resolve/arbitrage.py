@@ -19,6 +19,8 @@ Référence: PLAN.md phase 08, PRD F2, architecture §4.
 
 from __future__ import annotations
 
+import bisect
+
 from anonyfy.types import EntityType, Span
 
 __all__ = ["DEFAULT_PRIORITY", "resolve_overlaps"]
@@ -130,10 +132,26 @@ def resolve_overlaps(
 
     ordered = sorted(spans, key=sort_key, reverse=True)
 
+    # Sélection gloutonne O(n log n): on maintient les spans retenus triés par
+    # position de début dans un interval tree plat (liste triée + bisect). Les
+    # spans retenus ne se chevauchent jamais entre eux (invariant du glouton),
+    # donc pour un nouveau span (s, e) il suffit de tester le voisin immédiat à
+    # gauche (end > s) et l'absence de retained dont start ∈ [s, e) à droite.
     selected: list[Span] = []
+    starts: list[int] = []
     for span in ordered:
-        if not any(_overlaps(span, kept) for kept in selected):
-            selected.append(span)
+        s, e = span.start, span.end
+        j = bisect.bisect_right(starts, s)
+        # Voisin de gauche: retained[j-1] (start <= s). Chevauchement si end > s.
+        if j > 0 and selected[j - 1].end > s:
+            continue
+        # Voisin de droite: premier retained avec start >= e (pas de chevauchement).
+        # S'il existe un retained avec start dans [s, e), il chevauche ce span.
+        k = bisect.bisect_left(starts, e)
+        if j < k:
+            continue
+        selected.insert(j, span)
+        starts.insert(j, s)
 
     selected.sort(key=lambda s: s.start)
     return selected
