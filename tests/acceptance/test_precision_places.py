@@ -74,10 +74,12 @@ CAS_PRESERVES: tuple[tuple[str, str], ...] = (
     ("Je vais à Paris", "Paris"),
     ("Le train part de Lyon", "Lyon"),
     ("La réunion se tient à Paris", "Paris"),
-    # D42e : une commune en initiale de phrase sans indice d'adresse fort n'est
-    # pas masquée (fuite documentée de la commune de résidence en en-tête).
+    # D42e (amendé D45c, phase 45) : une commune en initiale de phrase sans
+    # indice d'adresse fort n'est pas masquée (fuite documentée). « Paris, le
+    # 23 août 2024. » (en-tête de lettre AVEC date) est désormais MASQUÉ
+    # (indice (d) « <Commune>, le <date> », D45h) ; « Paris est la capitale. »
+    # (sans date) reste préservé.
     ("Paris est la capitale.", "Paris"),
-    ("Paris, le 23 août 2024.", "Paris"),
 )
 
 
@@ -161,17 +163,28 @@ class TestToponymesProsePreserves:
 
 
 class TestCommuneInitialeD42e:
-    """D42e : commune en initiale de phrase sans indice d'adresse fort non masquée."""
+    """D42e (amendé D45c, phase 45) : commune en initiale de phrase.
+
+    Sans indice d'adresse fort -> non masquée (« Paris est la capitale. »).
+    En-tête de lettre « <Commune>, le <date> » (indice (d), D45h) -> masquée
+    COMMUNE (le cas « Paris, le 23 août 2024. » de D42e est renversé).
+    """
 
     def test_paris_capitale_preservee(self, vault) -> None:
         m = vault.mask("Paris est la capitale.")
         assert "Paris" in m.text
         assert not any(s.type == EntityType.COMMUNE for s in m.entities)
 
-    def test_paris_date_preservee(self, vault) -> None:
+    def test_paris_date_masquee_commune(self, vault) -> None:
+        """OBJ-105 (D45c) : l'en-tête « Paris, le 23 août 2024. » est masqué
+        COMMUNE (F3, condition (b) : règle mask-commune vérifiée)."""
         m = vault.mask("Paris, le 23 août 2024.")
-        assert "Paris" in m.text
-        assert not any(s.type == EntityType.COMMUNE for s in m.entities)
+        assert "Paris" not in m.text, f"« Paris » fuit dans {m.text!r}"
+        communes = [s for s in m.entities if s.type == EntityType.COMMUNE]
+        assert len(communes) == 1, f"attendu 1 span COMMUNE : {m.entities!r}"
+        assert communes[0].rule_id == "mask-commune", (
+            f"F3 violé : {communes[0].rule_id!r} ≠ mask-commune"
+        )
 
 
 class TestInvariantF3:

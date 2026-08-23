@@ -164,10 +164,31 @@ _ADDRESS_VERBS: tuple[str, ...] = (
     "habite à ",
     "résidant à ",
     "adresse : ",
+    # Phase 45 — R5 (D45b/D45h) : formule « Fait à <commune> » (participe passé
+    # capitalisé + « à » immédiatement avant la commune). COMMUNE-only : PAS
+    # ajouté à ``places._CP_TRIGGERS`` car « à » nu couvre déjà le CP dans
+    # « Fait à 16000 Angoulême » (indice (b)). La forme de match insensible à
+    # la casse et contrainte au début de ligne est portée par ``_FAIT_A_RE``
+    # (D45d) ; la chaîne exacte « Fait à » ci-dessous couvre la forme
+    # capitalisée canonique du formulaire.
+    "Fait à ",
 )
 # Fenêtre (caractères) entre la fin du verbe d'adresse et le début de la
 # commune : « immédiatement avant » (D42c) = au plus une espace blanche.
 _ADDRESS_VERB_WINDOW: int = 1
+
+#: Phase 45 — R5 (D45d) : indice (c) « Fait à <commune> » — participe passé
+#: capitalisé en début de ligne + « à » immédiatement avant la commune. Forme
+#: imposée : ``(?:^|\n)\s*fait à\s+`` insensible à la casse (matche « Fait à »,
+#: « FAIT À », « fait à » en début de ligne/paragraphe). Exclut la prose
+#: « il est fait à Paris » (minuscule, milieu de phrase).
+_FAIT_A_RE = re.compile(r"(?:^|\n)\s*fait à\s+", re.IGNORECASE)
+
+#: Phase 45 — R5 (D45h(ii)/D45k) : indice (d) « <Commune>, le <date> » en début
+#: de ligne — la commune est suivie de ``, le <chiffre>`` (dates en CHIFFRES
+#: uniquement). Les dates en toutes lettres (« le vingt-trois août », OBJ-108)
+#: restent hors périmètre.
+_HEADER_COMMA_LE_RE = re.compile(r", le \d")
 
 # Types de voie en tête d'un span VOIE (indice (a), D42d).
 _VOIE_TYPE_WORDS: frozenset[str] = frozenset(
@@ -179,16 +200,45 @@ _VOIE_TYPE_WORDS: frozenset[str] = frozenset(
 _NUMERO_VOIE_RE = re.compile(r"(?<!\d)(\d{1,4})\s*$")
 
 
+def _at_line_start(text: str, start: int) -> bool:
+    """True si ``start`` est le premier token (non espace) d'une ligne.
+
+    Position 0 du texte, ou précédé d'un ``\n`` (les espaces/tabulations de
+    retrait entre le début de ligne et le token sont admises). D45c/D45d : la
+    formule d'en-tête et le « Fait à » sont contraints au début de ligne.
+    """
+    i = start - 1
+    while i >= 0 and text[i] in " \t\f":
+        i -= 1
+    return i < 0 or text[i] == "\n"
+
+
 def _commune_a_indice_adresse(span: Span, text: str, cps: list[Span]) -> bool:
     """True si le span COMMUNE faible porte un indice d'adresse fort (D42c/D42f).
 
     (a) un verbe d'adresse se termine immédiatement avant le span
     (``places._trigger_before`` réutilisée, D42f) ; (b) un code postal est
-    adjacent au span (``places._cp_near_commune``, D42f).
+    adjacent au span (``places._cp_near_commune``, D42f) ; (c) la formule
+    « Fait à <commune> » en début de ligne (D45d, insensible à la casse) ;
+    (d) l'en-tête de lettre « <Commune>, le <date> » en début de ligne (D45h,
+    date en chiffres, D45k).
     """
     if places._trigger_before(span.start, text, _ADDRESS_VERBS, _ADDRESS_VERB_WINDOW):
         return True
-    return any(places._cp_near_commune(cp.start, cp.end, [span]) for cp in cps)
+    if any(places._cp_near_commune(cp.start, cp.end, [span]) for cp in cps):
+        return True
+    # Phase 45 — R5 (D45d) : indice (c). La formule se termine immédiatement
+    # avant la commune (fenêtre ``_ADDRESS_VERB_WINDOW``) ; ``\s+`` a déjà
+    # consommé l'espace entre « à » et la commune. Dans « Fait à 16000
+    # Angoulême », le CP intercalaire décale la fin du match de plus d'un
+    # caractère -> l'indice (b) porte le masquage (D45j, OBJ-107).
+    for m in _FAIT_A_RE.finditer(text, 0, span.start):
+        if span.start - m.end() <= _ADDRESS_VERB_WINDOW:
+            return True
+    # Phase 45 — R5 (D45h) : indice (d) — en-tête « <Commune>, le <date> ».
+    if _at_line_start(text, span.start) and _HEADER_COMMA_LE_RE.match(text, span.end):
+        return True
+    return False
 
 
 def _voie_a_indice(span: Span, text: str) -> bool:

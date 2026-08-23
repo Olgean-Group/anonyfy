@@ -161,6 +161,11 @@ EXCLUDED_NOMS: frozenset[str] = frozenset(
         "autre",
         "autres",
         "même",
+        # Phase 45 — R5 (D45a) : participe passé « fait » (formule « Fait à
+        # <commune> »). Présent dans le gazetteer noms, il était émis PATRONYME
+        # en initiale de phrase ; c'est le participe passé le plus fréquent de
+        # la langue, jamais un patronyme en contexte de formule (OBJ-109).
+        "fait",
         # Acronymes du domaine (labels de types structurés, OBJ-010).
         "nir",
         "siret",
