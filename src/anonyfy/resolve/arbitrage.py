@@ -106,6 +106,83 @@ def resolve_overlaps(
 
     prio = priority if priority is not None else DEFAULT_PRIORITY
 
+    # Phase 39 — R4 (D39a/D39b): un token PRENOM+COMMUNE adjacent à un candidat
+    # PATRONYME (ou PRENOM) est une PERSONNE, pas une commune : la lecture
+    # « commune » n'est presque jamais adjacente à un nom de personne
+    # (« Marie Lefebvre » = Marie PRENOM + Lefebvre PATRONYME, F3 conservé).
+    # Mécanisme : retirer les spans COMMUNE et le span de type opposé du token
+    # PRENOM ambigu, pour que la sélection gloutonne type correctement :
+    #  - candidat adjacent À DROITE (s.start == p.end + 1) : le token est le
+    #    PREMIER nom (« Marie Lefebvre ») -> le PATRONYME du token est retiré,
+    #    le PRENOM gagne ;
+    #  - candidat adjacent À GAUCHE (p.start == s.end + 1) : le token est le
+    #    DERNIER nom (« Pierre Bernard », Bernard -> PRENOM est le PRENOM du
+    #    token, retiré) -> le PATRONYME du token gagne.
+    # Sans candidat adjacent (D39d/D39e), aucun retrait : une commune ambiguë
+    # (« à Paris », « à Marie ») reste COMMUNE (non-régression S4).
+    # Placé AVANT le pré-filtre S3 : S3 retire la COMMUNE chevauchant un
+    # PATRONYME capté, ce qui masquerait l'ambiguïté PRENOM+COMMUNE.
+    personne = (EntityType.PATRONYME, EntityType.PRENOM)
+    # Index du voisinage : spans de personne par position de début/fin, et
+    # union disjointe des intervalles COMMUNE (arbre plat + bisect, comme le
+    # glouton). Évite un rescan O(n) par span PRENOM (perf du texte dense,
+    # phase 32 : 10 000 caractères, ~250 identifiants).
+    par_debut: dict[int, list[Span]] = {}
+    par_fin: dict[int, list[Span]] = {}
+    communes: list[Span] = []
+    for s in spans:
+        if s.type in personne:
+            par_debut.setdefault(s.start, []).append(s)
+            par_fin.setdefault(s.end, []).append(s)
+        elif s.type == EntityType.COMMUNE:
+            communes.append(s)
+    communes.sort(key=lambda s: s.start)
+    union_communes: list[tuple[int, int]] = []
+    for c in communes:
+        if not union_communes or c.start > union_communes[-1][1]:
+            union_communes.append((c.start, c.end))
+        else:
+            union_communes[-1] = (union_communes[-1][0], max(union_communes[-1][1], c.end))
+    _starts_communes = [u[0] for u in union_communes]
+
+    # Prénoms « ambigus » : un span PRENOM couvert par une commune ET adjacent
+    # à un candidat PATRONYME/PRENOM. Rôle :
+    #  - premier nom (« Marie Lefebvre ») : la COMMUNE et le PATRONYME du token
+    #    sont retirés, le PRENOM gagne ;
+    #  - dernier nom (« Pierre Bernard », Bernard) : la COMMUNE est retirée, le
+    #    PATRONYME (confiance ou priorité 2) gagne déjà sur le PRENOM.
+    prenoms_premiers: list[Span] = []
+    prenoms_derniers: list[Span] = []
+    for p in spans:
+        if p.type != EntityType.PRENOM:
+            continue
+        j = bisect.bisect_right(_starts_communes, p.start)
+        couvert = (j > 0 and union_communes[j - 1][1] > p.start) or (
+            j < len(union_communes) and union_communes[j][0] < p.end
+        )
+        if not couvert:
+            continue
+        droite = par_debut.get(p.end + 1, ())
+        gauche = par_fin.get(p.start - 1, ())
+        if droite and not gauche:
+            prenoms_premiers.append(p)
+        elif gauche and not droite:
+            prenoms_derniers.append(p)
+        # gauche ET droite : token entre deux personnes (rare, ex. « Jean Marie
+        # Lefebvre ») : pas de retrait, le comportement par défaut est conservé.
+    if prenoms_premiers or prenoms_derniers:
+
+        def _retire_d39(s: Span) -> bool:
+            if s.type == EntityType.COMMUNE:
+                return any(_overlaps(s, p) for p in prenoms_premiers) or any(
+                    _overlaps(s, p) for p in prenoms_derniers
+                )
+            if s.type == EntityType.PATRONYME:
+                return any(_overlaps(s, p) for p in prenoms_premiers)
+            return False
+
+        spans = [s for s in spans if not _retire_d39(s)]
+
     # Phase 28 — S3: retirer les spans COMMUNE/VOIE chevauchant un patronyme
     # capté par déclencheur contextuel, à condition que la commune/voie ne soit
     # pas strictement plus longue (une voie légitime comme « rue de BOISSEAU »
