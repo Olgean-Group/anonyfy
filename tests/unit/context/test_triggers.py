@@ -216,10 +216,18 @@ class TestCandidatNuR1:
     context-capture) est restreint à la position d'initiale de phrase, et ne
     s'y applique qu'à l'ambiguïté : un PATRONYME pur en initiale est ÉMIS
     (D38e, « Dupont habite ici » masqué) ; un PRENOM ambigu en initiale reste
-    rejeté (« Paul est arrivé » préservé). En couple prénom+nom (D38a) ou en
-    position structurelle (D38c), le candidat est à confiance >= 0.8 et émis.
-    Le filtre porte sur le masquage : observe voit toujours les candidats nus,
-    et strict lève toujours sur span faible."""
+    rejeté (« Paul est arrivé » préservé). En milieu de phrase, le nu isolé
+    PRENOM/PATRONYME est ÉMIS (D38b littéral, S5-Q1 : « J'ai vu Paul hier. »
+    -> Paul masqué). En couple prénom+nom (D38a) ou en position structurelle
+    (D38c), le candidat est à confiance >= 0.8 et émis. Le filtre porte sur le
+    masquage : observe voit toujours les candidats nus, et strict lève
+    toujours sur span faible."""
+
+    @pytest.fixture
+    def vault(self, tmp_path):
+        v = Vault(key=b"0" * 16, scope="s", registry_path=str(tmp_path / "reg.db"))
+        yield v
+        v.close()
 
     @pytest.fixture
     def vault(self, tmp_path):
@@ -251,6 +259,22 @@ class TestCandidatNuR1:
         m = vault.mask("Paul est arrivé")
         assert "Paul" in m.text, "prénom nu non masqué attendu en permissive"
         assert not any(e.type in (EntityType.PATRONYME, EntityType.PRENOM) for e in m.entities)
+
+    def test_patronyme_nu_milieu_emis_en_permissive(self, vault):
+        """Phase 38 — R3 (D38b littéral, S5-Q1) : un PATRONYME nu isolé en
+        milieu de phrase est ÉMIS (masqué) en permissive. « Il a rencontré
+        Dupont. » -> Dupont masqué."""
+        m = vault.mask("Il a rencontré Dupont.")
+        assert "Dupont" not in m.text, "patronyme nu en milieu attendu masqué (D38b)"
+        assert any(e.type == EntityType.PATRONYME for e in m.entities)
+
+    def test_prenom_nu_milieu_emis_en_permissive(self, vault):
+        """Phase 38 — R3 (D38b littéral, S5-Q1) : un PRENOM nu isolé en milieu
+        de phrase est ÉMIS (masqué) en permissive. « J'ai vu Paul hier. » ->
+        Paul masqué."""
+        m = vault.mask("J'ai vu Paul hier.")
+        assert "Paul" not in m.text, "prénom nu en milieu attendu masqué (D38b)"
+        assert any(e.type == EntityType.PRENOM for e in m.entities)
 
     def test_nom_nu_visible_en_observe(self, vault):
         m = vault.mask("Dupont", observe=True)

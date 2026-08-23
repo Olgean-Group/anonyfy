@@ -7,11 +7,12 @@ déplace le problème d'un plateau de la balance à l'autre.
 
 Ce test installe la mesure permanente (PRD « Corrections recette 0.1.3 », D38f) :
 
-- corpus POSITIF : >= 50 patronymes réels du gazetteer noms, répartis sur >= 10
-  contextes (>= 5 patronymes par contexte) : avec titre (M., Maître, Mme), sans
+- corpus POSITIF : >= 50 patronymes réels du gazetteer noms, répartis sur >= 11
+  contextes (>= 5 patronymes par contexte) : avec titre (M., Maître, Mme),  sans
   titre en initiale de phrase (PATRONYME pur), couple prénom+nom (Jean X,
   Marie X), liste (« Présents : X »), signature (« Cordialement,<br>X »), cellule
-  de tableau (« Nom : X »), énumération de noms. Seuil : rappel >= 0.98.
+  de tableau (« Nom : X »), énumération de noms, patronyme nu isolé en milieu de
+  phrase (D38b littéral). Seuil : rappel >= 0.98.
 - corpus NÉGATIF : >= 50 phrases = `CORPUS` existant de
   `test_no_false_positive.py` (30 phrases, réutilisé par import pour ne pas
   diverger) + 24 phrases additionnelles figées au commit RED (D38h) : noms de
@@ -136,6 +137,18 @@ POSITIF_PAR_CONTEXTE: tuple[tuple[str, tuple[tuple[str, tuple[str, ...]], ...]],
             ("Présents : Mercier, Fournier et Chevalier.", ("Mercier", "Fournier", "Chevalier")),
         ),
     ),
+    # 11. patronyme nu isolé en milieu de phrase (D38b littéral, S5-Q1) :
+    # « J'ai vu Paul hier. » -> Paul masqué. Le nu isolé en milieu est ÉMIS.
+    (
+        "nu-milieu",
+        (
+            ("Le contrat a été signé par Dupont.", ("Dupont",)),
+            ("J'ai vu Moreau hier.", ("Moreau",)),
+            ("Il a rencontré Lefebvre.", ("Lefebvre",)),
+            ("Nous avons croisé Mercier dans le couloir.", ("Mercier",)),
+            ("Le rapport a été rédigé par Fournier.", ("Fournier",)),
+        ),
+    ),
 )
 
 POSITIF: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
@@ -143,7 +156,7 @@ POSITIF: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
 )
 _TOTAL_PATRONYMES = sum(len(attendus) for _, attendus in POSITIF)
 _N_CONTEXTES = len(POSITIF_PAR_CONTEXTE)
-assert _N_CONTEXTES >= 10, "corpus positif : >= 10 contextes exigés"
+assert _N_CONTEXTES >= 11, "corpus positif : >= 11 contextes exigés"
 assert all(sum(len(a) for _, a in phrases) >= 5 for _, phrases in POSITIF_PAR_CONTEXTE), (
     "chaque contexte >= 5 patronymes"
 )
