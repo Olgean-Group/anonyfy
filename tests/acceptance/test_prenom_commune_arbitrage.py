@@ -17,9 +17,13 @@ adjacent (une position d'écart, ex. « Marie Lefebvre »), retirer les spans
 PATRONYME et COMMUNE du token pour laisser le PRENOM gagner.
 
 Contre-exemples (D39d, non-régression S4) : une commune ambiguë SANS patronyme
-adjacent (ex. « Je vais à Paris. », « à Marie ») reste typée COMMUNE. Le
-mécanisme « PRENOM+COMMUNE -> PRENOM par défaut » est REJETÉ (D39e,
-destructeur : 360 communes = prénoms, dont ``paris``).
+adjacent (ex. « Je vais à Paris. », « à Marie ») n'est pas transformée en
+PRENOM. Le mécanisme « PRENOM+COMMUNE -> PRENOM par défaut » est REJETÉ
+(D39e, destructeur : 360 communes = prénoms, dont ``paris``). D42c (phase 42,
+D-commune-strict, décision produit S5) invalide ensuite l'émission COMMUNE sur
+« à » nu : en prose sans indice d'adresse fort (verbe d'adresse immédiatement
+avant ou CP adjacent), la commune n'est PAS masquée — elle est PRÉSERVÉE.
+Ces contre-exemples attestent désormais la préservation (aucun span émis).
 
 Le commit RED (anonyfy 0.1.3) démontre : les formes neutres
 « Marie Lefebvre », « Pierre Bernard » sont déjà PRENOM+PATRONYME (correctif
@@ -68,7 +72,9 @@ CASES_POSITIFS: tuple[tuple[str, tuple[tuple[str, int, EntityType], ...]], ...] 
 )
 
 
-# --- Contre-exemples D39d : commune ambiguë SANS patronyme adjacent ---
+# --- Contre-exemples D39d (révisés par D42c, phase 42) : commune ambiguë en
+# prose SANS patronyme adjacent ET sans indice d'adresse fort (« à » nu) ->
+# PRÉSERVÉE (aucun span COMMUNE émis). Chaque cas = (phrase, mot, offset). ---
 CASES_COMMUNES_AMBIGUES: tuple[tuple[str, str, int], ...] = (
     ("Je vais à Paris.", "Paris", 10),
     ("à Marie", "Marie", 2),
@@ -92,7 +98,8 @@ def vault(tmp_path):
 
 class TestArbitragePrenomCommune:
     """R4 : une commune ambiguë (prénom+commune) adjacente à un patronyme est
-    un PRENOM ; sans patronyme adjacent elle reste COMMUNE (D39)."""
+    un PRENOM (D39a) ; sans patronyme adjacent ni indice d'adresse fort, elle
+    est PRÉSERVÉE, non masquée (D39a + D42c)."""
 
     @pytest.mark.parametrize("phrase,attentes", CASES_POSITIFS)
     def test_prenom_commune_adjacent(self, vault, phrase: str, attentes) -> None:
@@ -115,13 +122,15 @@ class TestArbitragePrenomCommune:
             )
 
     @pytest.mark.parametrize("phrase,mot,offset", CASES_COMMUNES_AMBIGUES)
-    def test_commune_ambiguë_sans_patronyme_adjacent(self, vault, phrase, mot, offset) -> None:
-        """D39 : sans patronyme adjacent, la commune ambiguë reste COMMUNE."""
+    def test_commune_ambiguë_sans_indice_adresse_préservée(
+        self, vault, phrase, mot, offset
+    ) -> None:
+        """D42c : en prose sans indice d'adresse fort, la commune ambiguë n'est
+        pas masquée — elle est PRÉSERVÉE (aucun span COMMUNE émis)."""
         m = vault.mask(phrase)
         assert phrase[offset : offset + len(mot)] == mot, "offset corrompu"
-        span = _span_a_offset(m, offset)
-        assert span is not None and span.type == EntityType.COMMUNE, (
-            f"{mot!r} dans {phrase!r} doit rester COMMUNE, obtenu "
-            f"{span.type.value if span else 'aucun span'} : "
+        assert _span_a_offset(m, offset) is None, (
+            f"{mot!r} dans {phrase!r} doit être PRÉSERVÉ (aucun span à "
+            f"l'offset {offset}), obtenu "
             f"{[(s.type.value, s.start, s.value) for s in m.entities]}"
         )
