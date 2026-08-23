@@ -117,13 +117,67 @@ _BARE_RULES: frozenset[str] = frozenset({"gazetteer-nom", "gazetteer-prenom", "c
 _BARE_CONFIDENCE_THRESHOLD: float = 0.8
 
 
-def _is_bare_candidate(span: Span) -> bool:
-    """True si ``span`` est un candidat nu (gazetteur seul, sans déclencheur)."""
-    return (
-        span.type in (EntityType.PATRONYME, EntityType.PRENOM)
-        and span.rule_id in _BARE_RULES
-        and span.confidence < _BARE_CONFIDENCE_THRESHOLD
-    )
+#: Phase 38 — R3 (D38b/D38e): fins de phrase pour la position « initiale »
+#: (premier mot d'une phrase). Seule cette position est ambiguë en français
+#: (toute phrase commence par une majuscule) — la recette R1.
+_SENTENCE_FINAL = frozenset({".", "!", "?", "…", "»", '"', "«"})
+
+
+def _at_sentence_initial(text: str, start: int) -> bool:
+    """True si ``start`` est le premier token d'une phrase (position ambiguë).
+
+    Premier token du texte, ou précédé d'une fin de phrase (`.`, `!`, `?`,
+    `…`, guillemets). Une virgule ou un deux-points ne termine PAS une phrase
+    (position structurelle, D38c) : le token après est en milieu.
+    """
+    if start <= 0:
+        return True
+    i = start - 1
+    while i >= 0 and text[i].isspace():
+        i -= 1
+    return i < 0 or text[i] in _SENTENCE_FINAL
+
+
+def _is_pure_patronyme(span: Span) -> bool:
+    """True si le premier mot du span est absent du gazetteer prénoms (D38e).
+
+    Un PATRONYME pur (nom seul) en initiale de phrase est émis (non ambigu) ;
+    un token à la fois PRENOM et PATRONYME reste rejeté (ambiguïté prénom).
+    """
+    first = span.value.split()[0].casefold()
+    return first not in load_prenoms()
+
+
+def _is_bare_candidate(span: Span, text: str) -> bool:
+    """True si ``span`` est un candidat nu à rejeter au masquage non-observe.
+
+    Phase 34 — R1 (D34b): un candidat gazetteer seul, sans déclencheur
+    (confidence < 0.8), n'était émis en permissive dans AUCUNE position — le
+    rappel s'est effondré (R3, recette 0.1.3 : 1,4 % hors contexte).
+
+    Phase 38 — R3 (D38b/D38d/D38e) : le rejet est restreint à la position
+    d'initiale de phrase (la position ambiguë), et s'y applique à PATRONYME et
+    PRENOM : un PATRONYME pur (absent du gazetteer prénoms) est émis (non
+    ambigu), un PRENOM ou un token ambigu (PRENOM ET PATRONYME) reste rejeté.
+
+    Milieu de phrase (position non ambiguë) : un candidat nu isolé
+    PRENOM/PATRONYME est ÉMIS (D38b littéral, S5-Q1 : « J'ai vu Paul hier. »
+    -> Paul masqué). Les faux positifs du corpus négatif (sociétés, lieux,
+    voies) sont traités au cas par cas à la détection (marqueurs non personne
+    dans triggers.py, arbitrage VOIE), pas en filtrant tous les nus.
+    """
+    if span.type not in (EntityType.PATRONYME, EntityType.PRENOM):
+        return False
+    if span.rule_id not in _BARE_RULES:
+        return False
+    if span.confidence >= _BARE_CONFIDENCE_THRESHOLD:
+        return False
+    if not _at_sentence_initial(text, span.start):
+        return False
+    # Position ambiguë (initiale) : seul un PATRONYME pur est émis (D38e).
+    if span.type == EntityType.PATRONYME and _is_pure_patronyme(span):
+        return False
+    return True
 
 
 # Phase 30 — S4: Permutation keyée sur [0, 100000) pour les CP (5 chiffres).
@@ -220,14 +274,16 @@ class Engine:
             entities = tuple(resolved)
             return MaskedText(text=text, entities=entities)
 
-        # Phase 34 — R1 (D34b/D34c/D34e): filtrage des candidats nus au niveau
-        # du masquage non-observe. Un span PATRONYME/PRENOM issu du seul
-        # gazetteur sans déclencheur (confidence < 0.8) n'est pas substitué en
-        # permissive (le premier mot de phrase n'est plus masqué). Les spans
-        # déclenchés (confidence >= 0.8, ex. « M. Jean », « M. Dupont ») restent
-        # masqués. observe (plus haut) et la policy strict (Vault.mask, qui
-        # détecte en amont) voient encore ces spans faibles.
-        resolved = [s for s in resolved if not _is_bare_candidate(s)]
+        # Phase 34 — R1 (D34b/D34c/D34e) + Phase 38 — R3 (D38b/D38d/D38e):
+        # filtrage des candidats nus au niveau du masquage non-observe, restreint
+        # à la position d'initiale de phrase. Un PATRONYME pur en initiale est
+        # émis (D38e) ; un PRENOM ou token ambigu en initiale est rejeté ; un
+        # candidat isolé en milieu de phrase (hors couple D38a / position
+        # structurelle D38c, déjà à >= 0.8) est rejeté. Les spans déclenchés
+        # (confidence >= 0.8, ex. « M. Jean », « M. Dupont ») restent masqués.
+        # observe (plus haut) et la policy strict (Vault.mask, qui détecte en
+        # amont) voient encore ces spans faibles.
+        resolved = [s for s in resolved if not _is_bare_candidate(s, text)]
 
         substitutions: list[tuple[int, int, str, EntityType]] = []
         # Phase 30 — S4: pré-calcul des substituts CP composites (dépendent du

@@ -126,6 +126,23 @@ def resolve_overlaps(
             )
         ]
 
+    # Phase 38 — R3 (correctif R3, arbitré par l'orchestrateur): un span
+    # PRENOM/PATRONYME entièrement contenu dans un span VOIE est une PARTIE DU
+    # NOM DE LA VOIE (« rue Victor Hugo », « boulevard Jean Jaurès »), pas une
+    # personne : la VOIE gagne. Sans voie couvrante (« M. Victor Hugo »), le
+    # couple prénom+nom reste détecté (personne légitime, D38a).
+    voies = [s for s in spans if s.type == EntityType.VOIE]
+    if voies:
+        personne_en_voie = [
+            s
+            for s in spans
+            if s.type in (EntityType.PRENOM, EntityType.PATRONYME)
+            and any(v.start <= s.start and s.end <= v.end for v in voies)
+        ]
+        if personne_en_voie:
+            rejetes = {id(s) for s in personne_en_voie}
+            spans = [s for s in spans if id(s) not in rejetes]
+
     def sort_key(s: Span) -> tuple[float, int, int]:
         # Tri décroissant: confiance (spécificité), longueur, priorité déclarée.
         return (s.confidence, s.end - s.start, prio.get(s.type, 0))

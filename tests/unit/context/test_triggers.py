@@ -210,11 +210,18 @@ class TestExcludedNomsR1:
 
 
 class TestCandidatNuR1:
-    """Phase 34 — R1 (D34b/D34c/D34e): un candidat nu (PATRONYME/PRENOM issu du
-    seul gazetteer sans déclencheur, confidence < 0.8, rule_id gazetteer-nom /
-    gazetteer-prenom / context-capture) n'est pas émis en permissive, reste
-    visible en observe (le filtre porte sur le masquage, pas la détection), et
-    lève en strict."""
+    """Phase 34 R1 + Phase 38 R3 (D38b/D38e, arbitré S5-Q1): le rejet des
+    candidats nus (PATRONYME/PRENOM issu du seul gazetteer sans déclencheur,
+    confidence < 0.8, rule_id gazetteer-nom / gazetteer-prenom /
+    context-capture) est restreint à la position d'initiale de phrase, et ne
+    s'y applique qu'à l'ambiguïté : un PATRONYME pur en initiale est ÉMIS
+    (D38e, « Dupont habite ici » masqué) ; un PRENOM ambigu en initiale reste
+    rejeté (« Paul est arrivé » préservé). En milieu de phrase, le nu isolé
+    PRENOM/PATRONYME est ÉMIS (D38b littéral, S5-Q1 : « J'ai vu Paul hier. »
+    -> Paul masqué). En couple prénom+nom (D38a) ou en position structurelle
+    (D38c), le candidat est à confiance >= 0.8 et émis. Le filtre porte sur le
+    masquage : observe voit toujours les candidats nus, et strict lève
+    toujours sur span faible."""
 
     @pytest.fixture
     def vault(self, tmp_path):
@@ -233,15 +240,37 @@ class TestCandidatNuR1:
         yield v
         v.close()
 
-    def test_nom_nu_non_emis_en_permissive(self, vault):
+    def test_patronyme_pur_initial_emis_en_permissive(self, vault):
+        """Phase 38 — R3 (D38e, arbitré S5-Q1): un PATRONYME pur (absent du
+        gazetteer prénoms) en initiale de phrase est ÉMIS en permissive (non
+        ambigu). « Dupont habite ici » est donc masqué — la phase 34 l'était
+        trop peu (rappel R3, 1,4 %)."""
         m = vault.mask("Dupont habite ici")
-        assert "Dupont" in m.text, "patronyme nu non masqué attendu en permissive"
-        assert not any(e.type == EntityType.PATRONYME for e in m.entities)
+        assert "Dupont" not in m.text, "patronyme pur en initiale attendu masqué (D38e)"
+        assert any(e.type == EntityType.PATRONYME for e in m.entities)
 
     def test_prenom_nu_non_emis_en_permissive(self, vault):
         m = vault.mask("Paul est arrivé")
         assert "Paul" in m.text, "prénom nu non masqué attendu en permissive"
         assert not any(e.type in (EntityType.PATRONYME, EntityType.PRENOM) for e in m.entities)
+
+    def test_patronyme_nu_milieu_emis_en_permissive(self, vault):
+        """Phase 38 — R3 (D38b littéral, S5-Q1) : un PATRONYME nu isolé en
+        milieu de phrase est ÉMIS (masqué) en permissive. « Il a rencontré
+        Dupont. » -> Dupont masqué."""
+        m = vault.mask("Il a rencontré Dupont.")
+        assert "Dupont" not in m.text, "patronyme nu en milieu attendu masqué (D38b)"
+        assert any(e.type == EntityType.PATRONYME for e in m.entities)
+
+    def test_prenom_nu_milieu_emis_en_permissive(self, vault):
+        """Phase 38 — R3 (D38b littéral, S5-Q1) : un PRENOM nu isolé en milieu
+        de phrase est ÉMIS (masqué) en permissive. « J'ai vu Paul hier. » ->
+        Paul masqué. « Paul » est à la fois dans le gazetteer prénoms et noms :
+        l'arbitrage peut le résoudre en PATRONYME (le gazetteer-nom gagne) —
+        l'exigence D38b porte sur le masquage, pas sur le type résolu."""
+        m = vault.mask("J'ai vu Paul hier.")
+        assert "Paul" not in m.text, "prénom nu en milieu attendu masqué (D38b)"
+        assert any(e.type in (EntityType.PRENOM, EntityType.PATRONYME) for e in m.entities)
 
     def test_nom_nu_visible_en_observe(self, vault):
         m = vault.mask("Dupont", observe=True)
