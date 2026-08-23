@@ -144,22 +144,18 @@ POSITIF: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
 _TOTAL_PATRONYMES = sum(len(attendus) for _, attendus in POSITIF)
 _N_CONTEXTES = len(POSITIF_PAR_CONTEXTE)
 assert _N_CONTEXTES >= 10, "corpus positif : >= 10 contextes exigés"
-assert all(
-    sum(len(a) for _, a in phrases) >= 5 for _, phrases in POSITIF_PAR_CONTEXTE
-), "chaque contexte >= 5 patronymes"
+assert all(sum(len(a) for _, a in phrases) >= 5 for _, phrases in POSITIF_PAR_CONTEXTE), (
+    "chaque contexte >= 5 patronymes"
+)
 assert _TOTAL_PATRONYMES >= 50, "corpus positif : >= 50 patronymes exigés"
 assert all(n.casefold() in load_noms() for n in _PURE), "patronymes tirés du gazetteer noms"
 
 
-def _patronymes_masques(phrase: str, m) -> set[str]:
-    """Patronymes attendus réellement masqués : présents dans la phrase source
-    (avec majuscule) mais absents du texte masqué (clair remplacé)."""
-    masques: set[str] = set()
+def _patronyme_fuit(attendus: tuple[str, ...], m) -> list[str]:
+    """Patronymes attendus ENCORE PRÉSENTS en clair dans le texte masqué
+    (non remplacés par un substitut : la donnée franchit la frontière, fuite)."""
     texte = m.text.casefold()
-    for mot in phrase.split():
-        if mot[:1].isupper() and mot.casefold() not in texte:
-            masques.add(mot.casefold())
-    return masques
+    return [a for a in attendus if a.casefold() in texte]
 
 
 @pytest.fixture
@@ -182,10 +178,9 @@ class TestRappelCorpusPositif:
     )
     def test_patronyme_masque(self, vault, phrase: str, attendus: tuple[str, ...]) -> None:
         m = vault.mask(phrase)
-        masques = _patronymes_masques(phrase, m)
-        manquants = [a for a in attendus if a.casefold() not in masques]
-        assert not manquants, (
-            f"patronymes non masqués dans {phrase!r}: {manquants}. "
+        fuites = _patronyme_fuit(attendus, m)
+        assert not fuites, (
+            f"patronymes en clair (fuite) dans {phrase!r}: {fuites}. "
             f"Spans : {[(s.type.value, round(s.confidence, 2)) for s in m.entities]}"
         )
 
@@ -195,8 +190,8 @@ class TestRappelCorpusPositif:
         trouve = 0
         for phrase, attendus in POSITIF:
             m = vault.mask(phrase)
-            masques = _patronymes_masques(phrase, m)
-            trouve += sum(1 for a in attendus if a.casefold() in masques)
+            fuites = set(_patronyme_fuit(attendus, m))
+            trouve += len(attendus) - len(fuites)
         rappel = trouve / total
         print(f"rappel={rappel:.3f} (patronymes: {trouve}/{total}, contextes: {_N_CONTEXTES})")
         assert rappel >= 0.98, f"rappel={rappel:.3f} < 0.98 sur {total} patronymes"
@@ -227,9 +222,7 @@ class TestPrecisionCorpusNegatif:
         rouges: list[str] = []
         for phrase in CORPUS_NEGATIF:
             m = vault.mask(phrase)
-            if not any(
-                s.type in (EntityType.PRENOM, EntityType.PATRONYME) for s in m.entities
-            ):
+            if not any(s.type in (EntityType.PRENOM, EntityType.PATRONYME) for s in m.entities):
                 preservees += 1
             else:
                 rouges.append(phrase)

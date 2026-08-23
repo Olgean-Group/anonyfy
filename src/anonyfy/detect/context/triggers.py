@@ -25,6 +25,7 @@ Référence: PLAN.md phase 12, critères 580-584. Décision D20.
 from __future__ import annotations
 
 import bisect
+import dataclasses
 import re
 
 from anonyfy.detect.gazetteers.loader import load_noms, load_prenoms
@@ -339,6 +340,164 @@ def _near_trigger(
     return j > 0 and trig_max_te_prefix[j] > tok_start - window
 
 
+#: Phase 38 — R3 (D38c): un candidat est en « position structurelle » si le
+#: dernier mot avant lui est « et » (énumération « X, Y et Z »).
+_STRUCT_ET_RE = re.compile(r"\bet\s*$", re.IGNORECASE)
+
+
+def _in_structural_position(text: str, tok_start: int) -> bool:
+    """True si le token à ``tok_start`` est dans une position structurelle.
+
+    Phase 38 — R3 (D38c): après ``Présents :``, ``Cordialement,``, en cellule de
+    tableau (label ``:``), dans une énumération (après ``,`` ou « et »), en début
+    de ligne non-première (bloc de signature de courriel). Une position
+    structurelle désigne une personne avec quasi-certitude, sans titre : le
+    candidat y est émis (confiance élevée).
+    """
+    if tok_start <= 0:
+        return False
+    i = tok_start - 1
+    while i >= 0 and text[i].isspace():
+        i -= 1
+    if i >= 0 and text[i] in (":", ",", "|"):
+        return True
+    if text[tok_start - 1] == "\n":
+        return True
+    return bool(_STRUCT_ET_RE.search(text[:tok_start]))
+
+
+#: Phase 38 — R3 (correctif R3, arbitré par l'orchestrateur): marqueurs de
+#: contexte NON PERSONNEL. Un candidat PRENOM/PATRONYME dont le début de phrase
+#: porte un mot d'organisation (« société », « cabinet », « groupe »...) ou de
+#: toponymisation (« rue », « boulevard », « quai »...) est le NOM D'UNE SOCIÉTÉ
+#: ou D'UNE VOIE, pas une personne : l'émettre ferait chuter la précision du
+#: corpus négatif figé (D38f). Ce garde est la « vraie réponse position/voisinage »
+#: évoquée au PLAN phase 38 (pas une refonte du système, pas de données réelles).
+_NON_PERSONNE_MARKERS: frozenset[str] = frozenset(
+    {
+        # Organisations (nom de société/cabinet/groupe/entreprise).
+        "société",
+        "societe",
+        "cabinet",
+        "groupe",
+        "entreprise",
+        "association",
+        "fondation",
+        "bureau",
+        "agence",
+        "syndicat",
+        "établissement",
+        "etablissement",
+        "administration",
+        "clinique",
+        "magasin",
+        "usine",
+        "mairie",
+        "école",
+        "ecole",
+        # Voies et lieux (toponyme = pas une personne).
+        "rue",
+        "boulevard",
+        "avenue",
+        "quai",
+        "place",
+        "pont",
+        "allée",
+        "allee",
+        "chemin",
+        "impasse",
+        "square",
+        "esplanade",
+        "route",
+        "gare",
+        "mont",
+        "tour",
+        "parc",
+        "port",
+        "village",
+        "château",
+        "chateau",
+        "hameau",
+        "clause",
+    }
+)
+_MARKER_LOOKBACK_WORDS: int = 5
+
+
+def _non_personne_position(text: str, tok_start: int) -> bool:
+    """True si la même phrase porte un marqueur non personnel juste avant le token.
+
+    Fenêtre bornée (``_MARKER_LOOKBACK_WORDS`` mots en arrière, sans franchir
+    une fin de phrase). Ex. : « La société Dupont », « La rue Victor Hugo » ->
+    les candidats prénom/nom y sont le nom de la société/voie, pas une personne.
+    « M. Dupont » (titre) et « Jean Dupont » (couple) ne portent aucun marqueur :
+    le mécanisme ne s'y applique pas.
+    """
+    if tok_start <= 0:
+        return False
+    n = 0
+    j = tok_start - 1
+    while j >= 0 and n < _MARKER_LOOKBACK_WORDS:
+        while j >= 0 and not text[j].isalpha():
+            if text[j] in ".!?…\n»":
+                return False
+            j -= 1
+        if j < 0:
+            return False
+        end = j + 1
+        while j >= 0 and text[j].isalpha():
+            j -= 1
+        if text[j + 1 : end].casefold() in _NON_PERSONNE_MARKERS:
+            return True
+        n += 1
+    return False
+
+
+def _boost_couples(
+    spans: list[Span],
+    text: str,
+    tokens: list[tuple[int, int, str]],
+    cfold_tokens: list[str],
+    prenoms,
+    noms,
+    non_personne: set[int],
+) -> None:
+    """Phase 38 — R3 (D38a): « deux tokens donnent un déclencheur ».
+
+    Un PRENOM connu (gazetteer prénoms) immédiatement adjacent (seuls des
+    espaces les séparent) à un PATRONYME connu (gazetteer noms) forme un couple
+    « prénom+nom » : les deux candidats passent à ``_BOOSTED`` (>= 0.8), sans
+    titre. Rattrape ``Jean Dupont``, ``Marie Lefebvre``, ``Claire Bernard``.
+
+    Un mot grammatical du gazetteer prénoms (« Le », « La », « Il »...) n'est
+    pas éligible au couple : ``EXCLUDED_NOMS`` (mot-outil, pas un prénom de
+    personne) — sans ce garde, « Le Bernard » (groupe) deviendrait un couple.
+    Idem pour les candidats en contexte non personnel (``non_personne``,
+    correctif R3) : « La rue Victor Hugo » ne doit pas devenir un couple.
+    """
+    if len(tokens) < 2:
+        return
+    for i in range(len(tokens) - 1):
+        if i in non_personne or i + 1 in non_personne:
+            continue
+        s0, e0 = tokens[i][0], tokens[i][1]
+        s1, e1 = tokens[i + 1][0], tokens[i + 1][1]
+        if not text[e0:s1].isspace():
+            continue
+        if (
+            cfold_tokens[i] in EXCLUDED_NOMS
+            or cfold_tokens[i + 1] in EXCLUDED_NOMS
+            or cfold_tokens[i] not in prenoms
+            or cfold_tokens[i + 1] not in noms
+        ):
+            continue
+        for idx, sp in enumerate(spans):
+            if sp.start == s0 and sp.end == e0 and sp.type == EntityType.PRENOM:
+                spans[idx] = dataclasses.replace(sp, confidence=_BOOSTED)
+            elif sp.start == s1 and sp.end == e1 and sp.type == EntityType.PATRONYME:
+                spans[idx] = dataclasses.replace(sp, confidence=_BOOSTED)
+
+
 def apply(
     text: str,
     triggers: tuple[str, ...] | list[str] | None = None,
@@ -367,13 +526,29 @@ def apply(
     cfold_tokens = [v.casefold() for (_, _, v) in tokens]
 
     spans: list[Span] = []
-    for tok_start, tok_end, value in tokens:
+    # Phase 38 — R3 (correctif R3): candidats en contexte non personnel
+    # (organisation/lieu) : pas émis comme PRENOM/PATRONYME.
+    non_personne = {
+        idx
+        for idx, (tok_start, _tok_end, _val) in enumerate(tokens)
+        if _non_personne_position(text, tok_start)
+    }
+    for idx, (tok_start, tok_end, value) in enumerate(tokens):
         key = value.casefold()
         # Un token chevauchant un déclencheur (ex. « M » dans « M. ») est la
         # partie lettrée du déclencheur lui-même, pas un candidat nom.
         if _overlaps_trigger(tok_start, tok_end, trig_starts, trig_max_te):
             continue
-        near = _near_trigger(tok_start, tok_end, trig_starts, trig_max_te, window)
+        title_near = _near_trigger(tok_start, tok_end, trig_starts, trig_max_te, window)
+        # Phase 38 — R3 (correctif R3): contexte non personnel (organisation /
+        # lieu) : pas émis comme PRENOM/PATRONYME. Le garde ne s'applique que
+        # SANS titre : « M. ABC AGENCE BUREAU CONSULTANT » est une personne
+        # (le garde doit rester inerte sous un titre « M. »/« Mme »/« Maître »).
+        if idx in non_personne and not title_near:
+            continue
+        # Phase 38 — R3 (D38c): une position structurelle (liste, cellule de
+        # tableau, énumération, début de ligne de signature) vaut déclencheur.
+        near = title_near or _in_structural_position(text, tok_start)
 
         if key in prenoms:
             spans.append(
@@ -415,10 +590,14 @@ def apply(
                 )
             )
 
+    # Phase 38 — R3 (D38a): couple prénom+nom adjacent = déclencheur. À faire
+    # avant l'arbitrage (les spans boostés à >= 0.8 sortent du filtre candidat nu).
+    _boost_couples(spans, text, tokens, cfold_tokens, prenoms, noms, non_personne)
+
     # Phase 35 — D35e: patronymes composés (2-3 mots) du gazetteer noms. Les
     # spans simples ci-dessus couvrent les tokens individuels; le span composé
-    # (plus long, même confiance) gagne l'arbitrage ``resolve_overlaps`` et est
-    # masqué en bloc par le cipher (l'entrée composée est dans le gazetteer).
+    # (plus long, même confiance) est gagné par l'arbitrage ``resolve_overlaps``
+    # et est masqué en bloc par le cipher (l'entrée composée est dans le gazetteer).
     spans.extend(
         _detect_composite_patronymes(tokens, cfold_tokens, noms, trig_starts, trig_max_te, window)
     )
