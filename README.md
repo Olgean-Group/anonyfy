@@ -98,8 +98,24 @@ reposent sur des gazetteers (INSEE, COG) et des déclencheurs contextuels
 | Email | regex | syntaxe | partie locale FPE, domaine gazetteer |
 | Plaque SIV | regex | format | FPE |
 | Prénom / nom | gazetteer INSEE + déclencheurs | — | gazetteer + registre de scope |
-| Commune / code postal | gazetteer COG INSEE | cohérence CP/commune | gazetteer |
+| Commune / code postal | gazetteer COG INSEE + base La Poste | cohérence CP/commune | gazetteer ; code postal valide La Poste |
 | Date de naissance | regex + déclencheur | calendaire | décalage déterministe borné |
+
+Depuis la 0.1.6, le substitut CODE_POSTAL est un code postal valide : le
+`code_postal` de la commune substituée, via le mapping déterministe
+`code_commune` → `code_postal` de la base officielle des codes postaux La Poste
+(dataset `laposte-hexasmal`, Licence Ouverte 2.0), au lieu d'un code commune
+Insee.
+
+### Limitation annoncée - Communes sans indice d'adresse fort
+
+- **Limitation annoncée (réduite en 0.1.6)** : les communes en en-tête de
+  lettre `<Commune>, le <date>` en début de ligne sont désormais masquées
+  (dates en chiffres) ; les communes en initiale SANS date et les toponymes de
+  prose (« Je vais à Paris ») restent préservés en `permissive`.
+- **Limitation résiduelle** : une date en toutes lettres (« le vingt-trois
+  août ») ne déclenche pas l'indice d'en-tête et la commune d'en-tête reste en
+  clair.
 
 ---
 

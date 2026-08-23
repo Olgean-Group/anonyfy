@@ -1,3 +1,73 @@
+## 0.1.6 (2026-08-23)
+
+Correctifs recette 0.1.5 (phases 45-46) : formule « Fait à … » corrigée (R5,
+`fait` exclu des patronymes + indices COMMUNE formulaires), amendement D42e
+(D45c : les communes en en-tête de lettre `<Commune>, le <date>` sont désormais
+masquées, la limitation annoncée en 0.1.5 est réduite), substitut CODE_POSTAL
+désormais un code postal valide via la base La Poste (R6). Aucun changement
+d'API publique. Limitations résiduelles : dates en toutes lettres (OBJ-108),
+patronyme rare `Fait` (OBJ-109), registres persistés antérieurs invalidés
+(D46h, empreinte gazetteer changée par l'ajout de `codes_postaux`). Tag v0.1.6
+et publication PyPI réservés à l'orchestrateur.
+
+### R5 (phase 45) - Formule « Fait à … » corrigée
+
+- **Avant** : dans « Fait à Angoulême, le 12 mars 2026. », le moteur masquait
+  « Fait » comme PATRONYME (le participe passé capitalisé en initiale de
+  phrase, présent dans le gazetteer noms) et laissait « Angoulême » (la vraie
+  donnée d'adresse) en clair — fuite silencieuse.
+- **Après** : `"fait"` est exclu des patronymes (`EXCLUDED_NOMS`, D45a), quel
+  que soit le chemin (`gazetteer-nom` ou `context-capture`), et deux indices
+  COMMUNE formulaires sont reconnus (D45b/D45h) : `Fait à <commune>` (insensible
+  à la casse, contraint au début de ligne) et `<Commune>, le <date>` en début
+  de ligne (dates en chiffres). Les contre-exemples D39d restent préservés
+  (« Je vais à Paris. », prose sans indice d'adresse fort).
+
+### Amendement D42e (D45c) - Communes en en-tête de lettre masquées
+
+- La limitation annoncée en 0.1.5 est réduite : les communes en en-tête de
+  lettre `<Commune>, le <date>` en début de ligne sont désormais masquées en
+  `permissive` (span COMMUNE, `rule_id == "mask-commune"`), au lieu d'être
+  préservées.
+- Les communes en initiale SANS date (« Paris est la capitale. ») restent
+  préservées en `permissive` (limitation résiduelle, voir plus bas).
+
+### R6 (phase 46) - Substitut CODE_POSTAL = code postal valide
+
+- **Avant** : le substitut CODE_POSTAL était un code commune Insee (38117 pour
+  Cognet, au lieu du vrai code postal 38350) — substitut non valide en aval,
+  F3-type « substitut de même type » non tenu pour CODE_POSTAL.
+- **Après** : le substitut est le `code_postal` de la commune substituée, via
+  le mapping déterministe `code_commune` → `code_postal` (base officielle des
+  codes postaux La Poste, dataset `laposte-hexasmal`, snapshot figé à la
+  conception, 35 007 codes, Licence Ouverte 2.0). Le substitut est un code
+  postal valide (5 chiffres, présent dans la base), département cohérent avec
+  la commune substituée. Communes sans code postal (Marseille, Lyon, Paris,
+  arrondissements) : repli sur le plus petit code postal valide du département.
+
+### Limitation annoncée - Communes sans indice d'adresse fort (réduite)
+
+- La limitation annoncée en 0.1.5 est réduite : les en-têtes de lettre
+  `<Commune>, le <date>` en début de ligne sont désormais masqués (dates en
+  chiffres). Les communes en initiale SANS date restent préservées en
+  `permissive` (toponymes de prose « Je vais à Paris », communes en initiale
+  sans indice d'adresse fort).
+- **Limitation résiduelle (OBJ-108) - dates en toutes lettres** :
+  `<Commune>, le <date>` n'est masqué que pour les dates en chiffres
+  (« le 23 août ») ; une date en toutes lettres (« le vingt-trois août ») ne
+  déclenche pas l'indice et la commune d'en-tête reste en clair.
+- **Limitation résiduelle (OBJ-109) - patronyme `Fait`** : le patronyme rare
+  `Fait` n'est plus masqué ; la mesure de rappel sur le corpus de test est
+  inchangée.
+
+### Registres persistés antérieurs (D46h)
+
+- L'empreinte du gazetteer a changé (ajout du gazetteer `codes_postaux` à la
+  version figée). Les registres créés avant 0.1.6 sont incompatibles : à
+  l'ouverture, `GazetteerVersionMismatch` est levée. Supprimer les registres
+  obsolètes (`rm ~/.anonyfy/registries/*.db`) ou exporter les données avant
+  migration.
+
 ## 0.1.5 (2026-08-23)
 
 Correctifs recette 0.1.4 (phases 42-43) : précision COMMUNE/VOIE par indices
