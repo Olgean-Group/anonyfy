@@ -66,7 +66,14 @@ class _Node:
     def __init__(self, depth: int) -> None:
         self.children: dict[str, _Node] = {}
         self.fail: _Node | None = None
-        self.outputs: list[str] = []  # substituts matchés en ce nœud (terminal)
+        # (substitut, longueur du motif matche): la longueur du motif EST
+        # nécessaire au calcul du span (phase 40, B2 résidu). Un output propre au
+        # nœud a ``len(pattern)``; un output propagé par lien de failure a la
+        # longueur du motif du nœud d'origine (plus courte). Utiliser
+        # ``node.depth`` (longueur du motif le plus long du nœud) pour tous les
+        # outputs élargit le span des outputs propagés et fait perdre le match
+        # exact à l'arbitrage unmask (le « M. » est avalé).
+        self.outputs: list[tuple[str, int]] = []  # (substitut, pattern_len)
         self.depth: int = depth
 
 
@@ -92,8 +99,9 @@ class AhoCorasick:
                 child = _Node(depth=node.depth + 1)
                 node.children[ch] = child
             node = child
-        if substitute not in node.outputs:
-            node.outputs.append(substitute)
+        entry = (substitute, len(pattern))
+        if entry not in node.outputs:
+            node.outputs.append(entry)
 
     def _build_failure_links(self) -> None:
         """Calcule les liens de failure et propage les outputs (BFS)."""
@@ -222,8 +230,14 @@ class AhoCorasick:
             child = node.children.get(ch)
             if child is not None:
                 node = child
-            for sub in node.outputs:
-                start = i - node.depth + 1
+            for sub, pattern_len in node.outputs:
+                # Phase 40 (B2 résidu): le span du hit est calculé depuis la
+                # longueur du motif matché (``pattern_len``), pas depuis
+                # ``node.depth``. Un output propagé par lien de failure a un
+                # motif plus court que le nœud hôte (ex. ``AZEVEDO`` dans
+                # ``M. AZEVEDO``): sans cela, le span élargi couvre le « M. »
+                # et le match exact perd l'arbitrage unmask (B2, 4/2000).
+                start = i - pattern_len + 1
                 end = i + 1
                 raw_hits.append(Hit(substitute=sub, start=start, end=end, match=text[start:end]))
 

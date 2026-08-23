@@ -168,3 +168,52 @@ class TestRoundTrip5000:
             )
         finally:
             v.close()
+
+    def test_roundtrip_m_contexte_substitut_composite_ne_avale_pas_le_m(self, tmp_path_factory):
+        """B2 résidu (phase 40): round-trip exact du texte complet ``M. <nom>``
+        quand un substitut mono-token est suffixe d'un substitut composite.
+
+        Scénario recette 0.1.3 (4 lignes fausses sur 2000): un nom mono-token
+        ``X`` est masqué en ``M. AZEVEDO``; un AUTRE nom composite a pour
+        substitut ``DE ALMEIDA AZEVEDO`` (variante ``M. AZEVEDO`` via
+        ``variants._monsieur_variant``). Au ``unmask``, l'Aho-Corasick émet pour
+        le nœud terminal ``M. AZEVEDO`` deux sorties: la variante composite
+        ``DE ALMEIDA AZEVEDO`` (span ``[0:10]``, propre au nœud) et le substitut
+        mono ``AZEVEDO`` propagé par lien de failure — dont le span était calculé
+        avec la profondeur du nœud (``[0:10]``) au lieu de la longueur du
+        substitut (``[3:10]``). Le match exact ``AZEVEDO`` n'étant jamais émis
+        avec son span réel, l'arbitrage par ``is_exact`` ne peut pas le
+        départager et la variante composite gagne, avalant le « ``M. `` ».
+
+        Le round-trip du texte complet ``M. AZEVEDO`` doit restituer
+        ``M. BOISBRUNO`` (le clair mono) et non le clair du composite.
+        """
+        from anonyfy.surrogate.case_pattern import apply_case as _apply_case
+
+        d = tmp_path_factory.mktemp("b2-composite-m")
+        v = Vault(key=_KEY, scope=_SCOPE, registry_path=str(d / "composite-m.db"))
+        try:
+            # Clair réel du substitut mono « AZEVEDO » (chiffrement déterministe).
+            clear_mono = v._engine.decrypt_surrogate(EntityType.PATRONYME, "AZEVEDO")
+            assert clear_mono is not None, "AZEVEDO pas déchiffrable (mono)"
+            # Inscrire le substitut mono comme un nom masqué.
+            v._registry.register_fpe("patronyme", clear_mono, surrogate="AZEVEDO", case_pattern="U")
+            # Clair réel du substitut composite se terminant par AZEVEDO.
+            clear_comp = v._engine.decrypt_surrogate(EntityType.PATRONYME, "DE ALMEIDA AZEVEDO")
+            assert clear_comp is not None, "DE ALMEIDA AZEVEDO pas déchiffrable (composite)"
+            assert clear_comp != clear_mono, "les deux clairs doivent différer"
+            v._registry.register_fpe(
+                "patronyme", clear_comp, surrogate="DE ALMEIDA AZEVEDO", case_pattern="U:U:U"
+            )
+
+            # Round-trip du texte complet « M. <substitut> ».
+            expected = "M. " + _apply_case(clear_mono, "U")
+            rt = v.unmask("M. AZEVEDO")
+            assert rt == expected, (
+                f"unmask('M. AZEVEDO') = {rt!r}, attendu {expected!r}. Le composite "
+                f"'DE ALMEIDA AZEVEDO' (clair {_apply_case(clear_comp, 'U:U:U')!r}) a "
+                f"vraisemblablement gagné l'arbitrage: le hit propagé du mono "
+                f"'AZEVEDO' a été émis avec le span du nœud composite."
+            )
+        finally:
+            v.close()
