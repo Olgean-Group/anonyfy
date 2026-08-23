@@ -197,13 +197,9 @@ class TestRoundTrip5000:
             clear_mono = v._engine.decrypt_surrogate(EntityType.PATRONYME, "AZEVEDO")
             assert clear_mono is not None, "AZEVEDO pas déchiffrable (mono)"
             # Inscrire le substitut mono comme un nom masqué.
-            v._registry.register_fpe(
-                "patronyme", clear_mono, surrogate="AZEVEDO", case_pattern="U"
-            )
+            v._registry.register_fpe("patronyme", clear_mono, surrogate="AZEVEDO", case_pattern="U")
             # Clair réel du substitut composite se terminant par AZEVEDO.
-            clear_comp = v._engine.decrypt_surrogate(
-                EntityType.PATRONYME, "DE ALMEIDA AZEVEDO"
-            )
+            clear_comp = v._engine.decrypt_surrogate(EntityType.PATRONYME, "DE ALMEIDA AZEVEDO")
             assert clear_comp is not None, "DE ALMEIDA AZEVEDO pas déchiffrable (composite)"
             assert clear_comp != clear_mono, "les deux clairs doivent différer"
             v._registry.register_fpe(
