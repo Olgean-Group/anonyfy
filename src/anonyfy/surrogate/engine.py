@@ -160,12 +160,11 @@ def _is_bare_candidate(span: Span, text: str) -> bool:
     PRENOM : un PATRONYME pur (absent du gazetteer prénoms) est émis (non
     ambigu), un PRENOM ou un token ambigu (PRENOM ET PATRONYME) reste rejeté.
 
-    Milieu de phrase : un candidat en couple prénom+nom (D38a) ou en position
-    structurelle (D38c) est déjà à confidence >= 0.8 et ne passe pas ici. Un
-    candidat ISOLÉ en milieu de phrase reste rejeté : l'émission en bloc des
-    noms nus isolés fait chuter la précision R1 du corpus négatif figé à 87 %
-    (< 95 %, D38f) — la recette exige de pencher vers le rappel là où la
-    position désigne une personne (couple/structurel), pas sur un nom nu isolé.
+    Milieu de phrase (position non ambiguë) : un candidat nu isolé
+    PRENOM/PATRONYME est ÉMIS (D38b littéral, S5-Q1 : « J'ai vu Paul hier. »
+    -> Paul masqué). Les faux positifs du corpus négatif (sociétés, lieux,
+    voies) sont traités au cas par cas à la détection (marqueurs non personne
+    dans triggers.py, arbitrage VOIE), pas en filtrant tous les nus.
     """
     if span.type not in (EntityType.PATRONYME, EntityType.PRENOM):
         return False
@@ -173,11 +172,11 @@ def _is_bare_candidate(span: Span, text: str) -> bool:
         return False
     if span.confidence >= _BARE_CONFIDENCE_THRESHOLD:
         return False
-    if _at_sentence_initial(text, span.start):
-        # Position ambiguë : seul un PATRONYME pur est émis (D38e).
-        if span.type == EntityType.PATRONYME and _is_pure_patronyme(span):
-            return False
-        return True
+    if not _at_sentence_initial(text, span.start):
+        return False
+    # Position ambiguë (initiale) : seul un PATRONYME pur est émis (D38e).
+    if span.type == EntityType.PATRONYME and _is_pure_patronyme(span):
+        return False
     return True
 
 

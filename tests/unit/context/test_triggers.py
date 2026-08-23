@@ -230,12 +230,6 @@ class TestCandidatNuR1:
         v.close()
 
     @pytest.fixture
-    def vault(self, tmp_path):
-        v = Vault(key=b"0" * 16, scope="s", registry_path=str(tmp_path / "reg.db"))
-        yield v
-        v.close()
-
-    @pytest.fixture
     def strict_vault(self, tmp_path):
         v = Vault(
             key=b"0" * 16,
@@ -271,10 +265,12 @@ class TestCandidatNuR1:
     def test_prenom_nu_milieu_emis_en_permissive(self, vault):
         """Phase 38 — R3 (D38b littéral, S5-Q1) : un PRENOM nu isolé en milieu
         de phrase est ÉMIS (masqué) en permissive. « J'ai vu Paul hier. » ->
-        Paul masqué."""
+        Paul masqué. « Paul » est à la fois dans le gazetteer prénoms et noms :
+        l'arbitrage peut le résoudre en PATRONYME (le gazetteer-nom gagne) —
+        l'exigence D38b porte sur le masquage, pas sur le type résolu."""
         m = vault.mask("J'ai vu Paul hier.")
         assert "Paul" not in m.text, "prénom nu en milieu attendu masqué (D38b)"
-        assert any(e.type == EntityType.PRENOM for e in m.entities)
+        assert any(e.type in (EntityType.PRENOM, EntityType.PATRONYME) for e in m.entities)
 
     def test_nom_nu_visible_en_observe(self, vault):
         m = vault.mask("Dupont", observe=True)

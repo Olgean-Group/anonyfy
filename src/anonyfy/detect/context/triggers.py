@@ -190,6 +190,18 @@ _TOKEN_RE = re.compile(r"[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]*")
 _MAX_COMPOSITE_WORDS = 3
 
 
+def _has_letters_between(text: str, a: int, b: int) -> bool:
+    """True si un caractère lettré se trouve entre les positions ``a`` et ``b``.
+
+    « La rue Victor Hugo » : entre « La » (fin 2) et « Victor » (début 7) il y
+    a « rue » -> True (mots non adjacents). Entre « Victor » et « Hugo » il
+    n'y a qu'un espace -> False (adjacents). Utilisé par le détecteur de
+    patronymes composés pour ne pas sauter par-dessus des mots non capitalisés
+    (ex. « Le Fournier » détecté sur « Le rapport a été rédigé par Fournier »).
+    """
+    return any(ch.isalpha() for ch in text[a:b])
+
+
 def _detect_composite_patronymes(
     tokens: list[tuple[int, int, str]],
     cfold_tokens: list[str],
@@ -197,6 +209,8 @@ def _detect_composite_patronymes(
     trig_starts: list[int],
     trig_max_te: list[int],
     window: int,
+    text: str,
+    non_personne: set[int],
 ) -> list[Span]:
     """Phase 35 — D35e: patronymes composés (2-3 mots) du gazetteer noms.
 
@@ -207,6 +221,17 @@ def _detect_composite_patronymes(
     couvrant les mots (l'entrée composée EST dans le gazetteer, donc masquable
     par le cipher). Modèle: ``places._phrase_matches`` (plus longue phrase,
     prefiltre ``multi_word_first_words``).
+
+    Phase 38 — R3 (fix QA): deux gardes supplémentaires par rapport à D35e.
+    (1) Adjacence texte : ``_TOKEN_RE`` ne garde que les mots capitalisés, donc
+    « Le rapport a été rédigé par Fournier » tokenise « Le » et « Fournier »
+    comme « adjacents » alors que le déterminant et le nom sont séparés par
+    des mots non capitalisés. Sans garde, le composé réel « LE FOURNIER »
+    (présent dans le gazetteer) est émis en un span couvrant TOUTE la phrase
+    (« Le [rapport a été rédigé par] Fournier ») et avale le patronyme réel.
+    (b) Garde non personne : un composé dont un token couvert porte un marqueur
+    de contexte non personnel (« La rue Victor Hugo ») est le nom d'une voie,
+    pas une personne (même règle que les spans simples, D38b/D38f).
 
     Confiance: ``_BOOSTED`` si un déclencheur est proche, ``_BASE`` sinon. Les
     composés nus restent filtrés par le candidat nu en permissive (phase 34,
@@ -230,11 +255,20 @@ def _detect_composite_patronymes(
             cfold_words: list[str] = []
             words: list[str] = []
             for k in range(i, min(i + _MAX_COMPOSITE_WORDS, len(tokens))):
+                # Phase 38 — R3 (fix QA): garde non contexte (b) : un token
+                # couvert par un marqueur non personne stoppe le composé.
+                if k in non_personne:
+                    break
+                # Phase 38 — R3 (fix QA): adjacence (a) : si un mot non
+                # capitalisé se trouve entre deux tokens, ils ne sont pas
+                # adjacents et ne peuvent former un patronyme composé.
+                if k > i and _has_letters_between(text, tokens[k - 1][1], tokens[k][0]):
+                    break
                 words.append(tokens[k][2])
                 cfold_words.append(cfold_tokens[k])
                 # k > i: un composé couvre AU MOINS 2 tokens. Sans ce garde-fou,
-                # un premier mot seul dans le gazette (ex. « M », initiale dans
-                # load_noms) serait émis comme composé et substitué.
+                # un premier mot seul dans le gazette (ex. « M », initialie
+                # dans load_noms) serait émis comme composé et substitué.
                 if k > i and " ".join(cfold_words) in noms:
                     best = (tokens[i][0], tokens[k][1], " ".join(words))
             if best is not None:
@@ -408,6 +442,7 @@ _NON_PERSONNE_MARKERS: frozenset[str] = frozenset(
         "impasse",
         "square",
         "esplanade",
+        "cours",
         "route",
         "gare",
         "mont",
@@ -419,6 +454,11 @@ _NON_PERSONNE_MARKERS: frozenset[str] = frozenset(
         "chateau",
         "hameau",
         "clause",
+        "église",
+        "eglise",
+        "cathédrale",
+        "cathedrale",
+        "basilique",
     }
 )
 _MARKER_LOOKBACK_WORDS: int = 5
@@ -599,6 +639,8 @@ def apply(
     # (plus long, même confiance) est gagné par l'arbitrage ``resolve_overlaps``
     # et est masqué en bloc par le cipher (l'entrée composée est dans le gazetteer).
     spans.extend(
-        _detect_composite_patronymes(tokens, cfold_tokens, noms, trig_starts, trig_max_te, window)
+        _detect_composite_patronymes(
+            tokens, cfold_tokens, noms, trig_starts, trig_max_te, window, text, non_personne
+        )
     )
     return spans
