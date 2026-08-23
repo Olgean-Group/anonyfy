@@ -1,3 +1,46 @@
+## 0.1.4 (2026-08-23)
+
+Correctifs recette 0.1.3 (phases 38-40) : rappel patronymes >= 98 % en
+permissive (R3), arbitrage prénom/commune avec PRENOM gagnant si patronyme
+adjacent (R4), résidu round-trip résolu (B2), double corpus de non-régression
+en CI. Aucun changement d'API publique ; le mode `observe` peut afficher plus
+de candidats qu'avant (le jeu de spans détectés s'élargit via D38a/D38c,
+contrat observe/strict inchangé). Tag v0.1.4 et publication PyPI réservés à
+l'orchestrateur.
+
+### R3 (phase 38) — Rappel patronymes >= 98 % en permissive
+
+- **Avant** : des patronymes nus isolés en milieu de phrase pouvaient ne pas
+  être émis en `permissive` (rappel sous la cible), malgré un filtre de
+  candidats nus déjà restreint introduit en 0.1.3.
+- **Après** : interprétation littérale D38b — un nom nu isolé en milieu de
+  phrase est masqué ; les faux positifs des zones de début sont contenus par
+  le contexte. Rappel mesuré sur double corpus : 1.000 (56/56 patronymes,
+  11 contextes), précision 1.000 (54/54 phrases négatives préservées).
+- Double corpus de non-régression (positif/negatif) ajouté en CI
+  (`tests/acceptance/test_recall_precision_corpus.py`, 108 tests).
+
+### R4 (phase 39) — Arbitrage prénom/commune
+
+- **Avant** : une forme type « Marie Lefebvre » pouvait être classée commune
+  (« Marie »), car le gazetteer communes (paris, marie...) gagnait par ordre
+  de résolution.
+- **Après** : arbitrage explicite — PRENOM gagne quand un patronyme adjacent
+  est détecté (« Marie Lefebvre », « Mme Marie Lefebvre », « Présents : Marie
+  Lefebvre »), avec invariants F3 tenus (`span.rule_id == mask-prenom`) et
+  contre-exemples D39d préservés (« Je vais à Paris. », « à Marie »).
+
+### B2 (phase 40) — Résidu round-trip résolu
+
+- **Cause identifiée** : l'AC span hits propageait une longueur de motif
+  erronée sur le span de sortie quand le substitut composite (multi-mots)
+  réécrivait le contexte suivant le nom.
+- **Corrigé** : la longueur du motif est calculée par output span ; le
+  résidu round-trip 4/2 000 de la recette est résolu — 0 échec sur
+  5 000 (test `test_roundtrip_5000.py`), plus un test de non-régression
+  dédié au substitut composite (le « m » de fin n'est plus avalé).
+- Compte de tests : 1246 passed (1108 en 0.1.3 base, 1246 après phase 40).
+
 ## 0.1.3 (2026-08-22)
 
 Correctifs recette 0.1.2 (phases 34-36) : précision patronymes/prénoms (R1),
