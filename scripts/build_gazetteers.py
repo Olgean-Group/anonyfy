@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build des gazetteers embarques (phase 09).
 
-Regenere les CSV gzippes `data/{prenoms,noms,communes,voies}.csv.gz` depuis les
-sources brutes filtrees `data/raw/*.csv` (snapshot embarque, hors reseau).
+Regenere les CSV gzippes
+`data/{prenoms,noms,communes,voies,codes_postaux}.csv.gz` depuis les sources
+brutes filtrees `data/raw/*.csv` (snapshot embarque, hors reseau).
 
 Reproductibilite bit a bit (critere 530):
   - lignes triees par cle deterministe (premiere colonne, casefold) ;
@@ -19,6 +20,8 @@ Sources reelles (documentees dans docs/ADR/0001-fpe-ff3.md section 11):
   noms:      Liste de patronymes extraite de SIRENE (INSEE), data.gouv.fr 14/10/2018
   communes:  INSEE Code Officiel Geographique (COG) 2026 (v_commune_2026.csv)
   voies:     Base Adresse Nationale (BAN), export par dept, snapshot 20/08/2026
+  codes_postaux:  La Poste - base officielle des codes postaux (laposte-hexasmal),
+                  snapshot fige a la conception (phase 46, R6), Licence Ouverte 2.0
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ import sys
 from io import StringIO
 from pathlib import Path
 
-GAZETTEERS = ("prenoms", "noms", "communes", "voies")
+GAZETTEERS = ("prenoms", "noms", "communes", "voies", "codes_postaux")
 
 # Provenance des sources (figee dans l'ADR 0001 section 11).
 SOURCES: dict[str, dict[str, str]] = {
@@ -53,6 +56,13 @@ SOURCES: dict[str, dict[str, str]] = {
             "snapshot 20/08/2026 (05/15/23/48/90)"
         ),
         "url": "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv/",
+    },
+    "codes_postaux": {
+        "source": (
+            "La Poste - base officielle des codes postaux (dataset laposte-hexasmal), "
+            "snapshot fige a la conception, Licence Ouverte 2.0 (attribution requise)"
+        ),
+        "url": "https://www.data.gouv.fr/api/1/datasets/r/008a2dda-2c60-4b63-b910-998f6f818089",
     },
 }
 
@@ -91,7 +101,7 @@ def build_one(data_dir: Path, name: str) -> bytes:
 
 
 def build_all(data_dir: Path) -> dict[str, bytes]:
-    """Regenere les 4 CSV gzippes en memoire."""
+    """Regenere les 5 CSV gzippes en memoire."""
     return {name: build_one(data_dir, name) for name in GAZETTEERS}
 
 

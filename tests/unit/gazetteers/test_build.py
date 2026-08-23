@@ -33,7 +33,7 @@ def build_mod():
 
 def test_raw_sources_present():
     """Les sources brutes filtrees sont embarquees (reproductibilite hors reseau)."""
-    for name in ("prenoms", "noms", "communes", "voies"):
+    for name in ("prenoms", "noms", "communes", "voies", "codes_postaux"):
         assert (RAW / f"{name}.csv").exists(), f"raw/{name}.csv manquant"
 
 
@@ -41,7 +41,7 @@ def test_build_deterministic(build_mod):
     """Deux builds produisent des octets identiques (meme contenu, mtime fixe)."""
     built1 = build_mod.build_all(DATA)
     built2 = build_mod.build_all(DATA)
-    assert set(built1) == {"prenoms", "noms", "communes", "voies"}
+    assert set(built1) == {"prenoms", "noms", "communes", "voies", "codes_postaux"}
     for name in built1:
         assert built1[name] == built2[name], f"{name} non deterministe"
 
@@ -59,7 +59,7 @@ def test_manifest_computes_version_and_sha256(build_mod):
     built = build_mod.build_all(DATA)
     manifest = build_mod.compute_manifest(DATA, built)
     assert isinstance(manifest["version"], str) and len(manifest["version"]) > 0
-    for name in ("prenoms", "noms", "communes", "voies"):
+    for name in ("prenoms", "noms", "communes", "voies", "codes_postaux"):
         g = manifest["gazetteers"][name]
         assert len(g["sha256"]) == 64
         assert g["count"] > 0

@@ -13,6 +13,7 @@ from anonyfy.detect.gazetteers.loader import (
     GazetteerVersionMismatch,
     check_gazetteer_version,
     gazetteer_version,
+    load_codes_postaux,
     load_communes,
     load_noms,
     load_prenoms,
@@ -86,6 +87,55 @@ def test_communes_departement_attribute():
     dep = g["Paris"].departement
     assert isinstance(dep, str)
     assert dep == "75"
+
+
+def test_communes_code_commune_attribute():
+    """Phase 46 (R6): l'attribut code_commune (colonne 1) est lu pour les communes."""
+    g = load_communes()
+    cc = g["Paris"].code_commune
+    assert isinstance(cc, str)
+    assert cc == "75056"
+
+
+# --- codes postaux (phase 46, R6) ---
+
+
+def test_codes_postaux_coverage():
+    """Critere 3 (phase 46): load_codes_postaux() couvre les 35 007 code_commune."""
+    m = load_codes_postaux()
+    assert len(m) == 35007
+
+
+def test_codes_postaux_tie_break_multi_cp():
+    """D46b: une commune multi-CP -> le plus petit code_postal (tie-break)."""
+    m = load_codes_postaux()
+    assert m["2A004"] == "20000"  # Ajaccio: 20000/20090/20167 -> 20000
+
+
+def test_codes_postaux_corse():
+    """D46d: Corse 2A/2B, ex. Afa 2A001 -> 20167."""
+    m = load_codes_postaux()
+    assert m["2A001"] == "20167"
+
+
+def test_codes_postaux_dom():
+    """D46e: DOM 97101 Abymes -> 97139 (tie-break 97139/97142)."""
+    m = load_codes_postaux()
+    assert m["97101"] == "97139"
+
+
+def test_codes_postaux_communes_sans_cp_absentes():
+    """D46c: Marseille 13055 / Lyon 69123 / Paris 75056 absents (fallback dept)."""
+    m = load_codes_postaux()
+    assert "13055" not in m
+    assert "69123" not in m
+    assert "75056" not in m
+
+
+def test_codes_postaux_angouleme():
+    """Angouleme 16015 -> 16000 (cas nominal du R6)."""
+    m = load_codes_postaux()
+    assert m["16015"] == "16000"
 
 
 # --- voies ---
