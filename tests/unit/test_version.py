@@ -1,13 +1,13 @@
-"""Vérifie la cohérence version pyproject / __version__ / CHANGELOG pour v0.1.3.
+"""Vérifie la cohérence version pyproject / __version__ / CHANGELOG pour v0.1.4.
 
-Phase 37 : préparation publication 0.1.3. Correctifs recette 0.1.2 (phases
-34-36) : R1 (précision patronymes/prénoms, déclencheur requis + exclusion
-mots-outils), R2 (permutation paresseuse, premier mask < 3 s), S1 (filet
-global anti-fuite + détection patronymes composés), B2 (restitution casse des
-noms composés à trait d'union et article élidé). Le tag v0.1.3 et la
-publication PyPI sont réservés à l'orchestrateur (après confirmation
-utilisateur) ; ce test ne valide que la préparation du dépôt
-(version pyproject + `__version__` du module src + en-tête CHANGELOG).
+Phase 41 : préparation publication 0.1.4. Correctifs recette 0.1.3 (phases
+38-40) : R3 (rappel patronymes >= 98 % en permissive, noms nus isolés en
+milieu masqués), R4 (arbitrage prénom/commune, PRENOM gagne si patronyme
+adjacent, F3 tenu), B2 (résidu round-trip résolu), double corpus de
+non-régression en CI. Le tag v0.1.4 et la publication PyPI sont réservés à
+l'orchestrateur (après confirmation utilisateur) ; ce test ne valide que la
+préparation du dépôt (version pyproject + `__version__` du module src +
+en-tête CHANGELOG).
 """
 
 import tomllib
@@ -20,21 +20,21 @@ PYPROJECT = REPO / "pyproject.toml"
 CHANGELOG = REPO / "CHANGELOG.md"
 
 
-def test_pyproject_version_est_0_1_3() -> None:
+def test_pyproject_version_est_0_1_4() -> None:
     with PYPROJECT.open("rb") as fh:
         project = tomllib.load(fh)["project"]
-    assert project["version"] == "0.1.3"
+    assert project["version"] == "0.1.4"
 
 
-def test_anonyfy_version_interne_egale_0_1_3() -> None:
-    """Le module installé EN COURANT depuis src doit exposer __version__ == 0.1.3.
+def test_anonyfy_version_interne_egale_0_1_4() -> None:
+    """Le module installé EN COURANT depuis src doit exposer __version__ == 0.1.4.
 
     pytest.ini fixe ``pythonpath = ["src"]``, donc ``import anonyfy`` charge le
     paquet local (src/anonyfy) et non une éventuelle version PyPI installée.
     """
-    assert anonyfy.__version__ == "0.1.3"
+    assert anonyfy.__version__ == "0.1.4"
 
 
-def test_changelog_commence_par_0_1_3() -> None:
+def test_changelog_commence_par_0_1_4() -> None:
     texte = CHANGELOG.read_text(encoding="utf-8")
-    assert texte.startswith("## 0.1.3")
+    assert texte.startswith("## 0.1.4")
