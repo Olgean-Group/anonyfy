@@ -1,12 +1,14 @@
 """Chargeur paresseux des gazetteers embarques (phase 09).
 
-Les gazetteers (prenoms, noms/patronymes, communes, voies) sont embarques en CSV
-gzippé dans ``data/`` et chargés en mémoire au premier appel (chargement paresseux).
-L'index est insensible à la casse (casefold). Chaque entrée porte des attributs:
+Les gazetteers (prenoms, noms/patronymes, communes, voies, codes_postaux) sont
+embarques en CSV gzippé dans ``data/`` et chargés en mémoire au premier appel
+(chargement paresseux). L'index est insensible à la casse (casefold). Chaque
+entrée porte des attributs:
   - prenoms:   ``genre`` (M / F / MF)
-  - communes:  ``departement`` (code département INSEE)
+  - communes:  ``departement`` (code département INSEE), ``code_commune`` (phase 46)
   - noms:      ``count`` (nombre d'occurrences)
   - voies:     nom uniquement
+  - codes_postaux: mapping ``code_commune -> code_postal`` (La Poste, phase 46)
 
 Empreinte de version (D5, OBJ-003): ``gazetteer_version()`` retourne l'empreinte
 figée du gazetteer embarqué (sha256 du manifest). Au ``unmask``, le registre
@@ -40,15 +42,16 @@ class GazetteerVersionMismatch(Exception):
 class GazetteerEntry:
     """Entrée d'un gazetteer avec attributs optionnels selon le type.
 
-    ``genre`` pour les prénoms, ``departement`` pour les communes, ``count``
-    pour les patronymes. Les attributs non pertinents restent à leur valeur par
-    défaut (chaîne vide / 0).
+    ``genre`` pour les prénoms, ``departement`` et ``code_commune`` pour les
+    communes, ``count`` pour les patronymes. Les attributs non pertinents
+    restent à leur valeur par défaut (chaîne vide / 0).
     """
 
     name: str
     genre: str = ""
     departement: str = ""
     count: int = 0
+    code_commune: str = ""
 
 
 class Gazetteer:
@@ -110,13 +113,15 @@ class Gazetteer:
 
 _CACHE: dict[str, Gazetteer] = {}
 _VERSION: str | None = None
+_CODES_POSTAUX: dict[str, str] | None = None
 
 
 def reset_cache() -> None:
     """Invalide le cache paresseux (tests / rechargement explicite)."""
-    global _VERSION
+    global _VERSION, _CODES_POSTAUX
     _CACHE.clear()
     _VERSION = None
+    _CODES_POSTAUX = None
 
 
 def _read_csv_gz(name: str) -> tuple[list[str], list[list[str]]]:
@@ -177,17 +182,43 @@ def load_noms() -> Gazetteer:
 
 
 def load_communes() -> Gazetteer:
-    """Gazetteer des communes (INSEE COG 2026) avec attribut département."""
+    """Gazetteer des communes (INSEE COG 2026) avec attributs département + code_commune."""
     if "communes" not in _CACHE:
 
         def make(col, row):
             return GazetteerEntry(
                 name=row[col["nom"]].strip(),
                 departement=row[col["departement"]].strip(),
+                code_commune=row[col["code_commune"]].strip(),
             )
 
         _CACHE["communes"] = _build_index("communes", make)
     return _CACHE["communes"]
+
+
+def load_codes_postaux() -> dict[str, str]:
+    """Mapping ``code_commune -> code_postal`` (La Poste, phase 46 / R6).
+
+    Base officielle des codes postaux La Poste (dataset ``laposte-hexasmal``),
+    snapshot figé à la conception (D46a). Filtrée à ``code_commune,code_postal``
+    avec tie-break déterministe D46b (une commune multi-CP -> le plus petit
+    code postal, tri numérique croissant). 35 007 code_commune couverts.
+    Les communes sans CP direct (Marseille 13055, Lyon 69123, Paris 75056) sont
+    absentes: le fallback D46c (plus petit CP valide du département) est du
+    ressort du moteur de substitution.
+    """
+    global _CODES_POSTAUX
+    if _CODES_POSTAUX is None:
+        header, rows = _read_csv_gz("codes_postaux")
+        col = {c: i for i, c in enumerate(header)}
+        mapping: dict[str, str] = {}
+        for row in rows:
+            cc = row[col["code_commune"]].strip()
+            cp = row[col["code_postal"]].strip()
+            if cc:
+                mapping[cc] = cp
+        _CODES_POSTAUX = mapping
+    return _CODES_POSTAUX
 
 
 def load_voies() -> Gazetteer:
@@ -242,6 +273,7 @@ __all__ = [
     "GazetteerVersionMismatch",
     "check_gazetteer_version",
     "gazetteer_version",
+    "load_codes_postaux",
     "load_communes",
     "load_noms",
     "load_prenoms",

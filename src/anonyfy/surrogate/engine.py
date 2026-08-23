@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from anonyfy.detect.context import dates_text, places, triggers
 from anonyfy.detect.context import email as email_ctx
 from anonyfy.detect.gazetteers.loader import (
+    load_codes_postaux,
     load_communes,
     load_noms,
     load_prenoms,
@@ -336,6 +337,41 @@ def _cp_prefix(dept: str) -> str:
     return "20" if dept in ("2A", "2B") else dept
 
 
+def _dept_of_code_commune(code_commune: str) -> str:
+    """Département d'un code_commune (COG): 2A/2B Corse, DOM/territoires 3 chiffres."""
+    if code_commune.startswith("2A") or code_commune.startswith("2B"):
+        return code_commune[:2]
+    if len(code_commune) >= 3 and code_commune[:2] in ("97", "98"):
+        return code_commune[:3]
+    return code_commune[:2]
+
+
+_CP_BY_DEPT_CACHE: dict[str, list[str]] | None = None
+_CP_IDX_BY_DEPT: dict[str, dict[str, int]] | None = None
+
+
+def _valid_cps_for_dept(cp_map: dict[str, str], dept: str) -> list[str]:
+    """Liste triée (croissante) des codes postaux valides d'un département.
+
+    Construit depuis le mapping ``code_commune -> code_postal`` (base La Poste):
+    le département d'un code_commune est dérivé de son préfixe (D46d Corse
+    2A/2B, D46e DOM 971-976 / territoires 984-989 sur 3 chiffres). Cache
+    paresseux module (gazetteer figé, D46h). Liste vide si le dept n'a aucun
+    CP dans la base. L'index par CP (position dans la liste triée) est aussi
+    caché pour le sondage O(1) (M4/phase 32, perf).
+    """
+    global _CP_BY_DEPT_CACHE, _CP_IDX_BY_DEPT
+    if _CP_BY_DEPT_CACHE is None:
+        by_dept: dict[str, set[str]] = {}
+        for cc, cp in cp_map.items():
+            by_dept.setdefault(_dept_of_code_commune(cc), set()).add(cp)
+        _CP_BY_DEPT_CACHE = {d: sorted(s) for d, s in by_dept.items()}
+        _CP_IDX_BY_DEPT = {
+            d: {cp: i for i, cp in enumerate(cps)} for d, cps in _CP_BY_DEPT_CACHE.items()
+        }
+    return _CP_BY_DEPT_CACHE.get(dept, [])
+
+
 class Engine:
     """Moteur de masquage (phase 08 + 13).
 
@@ -620,19 +656,33 @@ class Engine:
         return None
 
     def _compute_cp_surrogates(self, resolved: list[Span]) -> dict[int, tuple[str | None, int]]:
-        """Phase 30 — S4: pré-calcul des substituts CP composites.
+        """Phase 30 — S4 + phase 46 (R6): pré-calcul des substituts CP composites.
 
-        Pour chaque CP couplé à une commune, le substitut est un CP du département
-        de la commune substituée (cohérence, PRD §7). L'indice chiffré (Permutation
-        sur [0, 100000)) est stocké dans ``clear_index`` du registre pour la
-        réversibilité: au unmask, ``clear_index`` -> ``Permutation.decrypt`` -> CP clair.
+        Quand une commune est couplée au CP, le substitut est le ``code_postal``
+        de la commune substituée (base officielle La Poste, mapping
+        ``code_commune`` -> ``code_postal``) au lieu de ``dept + 3 chiffres``
+        (R6: l'ancien substitut était un code commune Insee, ex. 38117 pour
+        Cognet au lieu de 38350). Cohérence département conservée (PRD §7).
 
-        Pour un CP après déclencheur sans commune, un département aléatoire est
-        choisi (HMAC-déterministe), différent du département original pour éviter
-        la fuite.
+        D46c: une commune sans CP direct dans la base (Marseille 13055, Lyon
+        69123, Paris 75056) retombe sur le plus petit CP valide de son
+        département. D46d: Corse 2A/2B via le mapping (2A001 -> 20167), aucun
+        traitement spécial. D46e: DOM (971-976) et territoires (984-989) présents
+        dans la base, mapping direct.
+
+        Le sondage linéaire est conservé (D46f) sur la liste triée (croissante,
+        bouclage) des CP valides du département, départ au ``code_postal`` de la
+        commune substituée, pour éviter les collisions (CP déjà attribués) et le
+        point fixe (== clair). Chemin trigger-only (CP sans commune): un CP valide
+        du département aléatoire (HMAC), choisi dans la liste triée des CP du dept.
+
+        L'indice chiffré (Permutation sur [0, 100000)) est stocké dans
+        ``clear_index`` du régistre pour la réversibilité: au unmask,
+        ``clear_index`` -> ``Permutation.decrypt`` -> CP clair (inchangé).
 
         Retourne ``{id(span): (surrogate, encrypted_idx)}``. Le surrogate est un
-        CP à 5 chiffres du bon département (ou None si non masquable).
+        code postal valide à 5 chiffres du bon département (ou None si non
+        masquable, ex. département sans CP dans la base).
         """
         out: dict[int, tuple[str | None, int]] = {}
         cps = [s for s in resolved if s.type == EntityType.CODE_POSTAL]
@@ -640,40 +690,73 @@ class Engine:
             return out
         communes = [s for s in resolved if s.type == EntityType.COMMUNE]
         gaz = load_communes()
+        cp_map = load_codes_postaux()
         perm = _cp_permutation(self._key, self._scope)
+        # Réservations locales: les CP de la même commune substituée partagent le
+        # même point de départ; le premier prend le CP de la commune, les suivants
+        # sondent vers les CP suivants (injectivité intra-passe).
+        reserved: set[str] = set()
         for cp in cps:
             encrypted_idx = perm.encrypt(int(cp.value))
-            # Trouver la commune couplée la plus proche.
-            dept = self._coupled_dept(cp, communes, gaz)
-            if dept is None:
-                # Trigger-only: dept aléatoire (HMAC), != dept original.
+            commune_sub = self._coupled_commune(cp, communes, gaz)
+            if commune_sub is None:
+                # Chemin trigger-only: département aléatoire (HMAC), != dept
+                # original; CP valide de ce dept choisi par HMAC (D46f).
                 dept = self._random_dept(cp.value)
-            prefix = _cp_prefix(dept)
-            suffix_len = 5 - len(prefix)
-            base_suffix = encrypted_idx % (10**suffix_len)
-            # Sondage linéaire pour éviter collisions et point fixe.
-            surrogate = None
-            for probe in range(10**suffix_len):
-                suffix = (base_suffix + probe) % (10**suffix_len)
-                cand = prefix + str(suffix).zfill(suffix_len)
-                if cand == cp.value:
-                    continue  # éviter point fixe
-                if self._registry.contains(cand):
-                    continue  # déjà attribué à un autre clair
-                surrogate = cand
-                break
+                candidates = _valid_cps_for_dept(cp_map, dept)
+                base = self._random_dept_cp(dept, cp.value, candidates)
+            else:
+                dept = gaz[commune_sub.casefold()].departement
+                candidates = _valid_cps_for_dept(cp_map, dept)
+                code_commune = gaz[commune_sub.casefold()].code_commune
+                base = cp_map.get(code_commune)
+                if base is None:
+                    # D46c: commune sans CP direct (Marseille/Lyon/Paris, ou
+                    # inconnue du mapping) -> plus petit CP valide du dept.
+                    base = candidates[0] if candidates else None
+            if base is None or not candidates:
+                out[id(cp)] = (None, encrypted_idx)
+                continue
+            surrogate = self._probe_cp(dept, candidates, base, cp.value, reserved)
             if surrogate is None:
-                # Tous les candidats sont pris ou points fixes (improbable).
-                surrogate = prefix + str(base_suffix).zfill(suffix_len)
+                # D46f, dernier recours : tous les CP valides du département sont
+                # pris (scope saturé, ex. corpus de non-régression B2). On
+                # retombe sur l'ancien mécanisme « dept + 3 chiffres » (domaine
+                # 1000) pour préserver l'injectivité (invariant 3) et le
+                # round-trip; la cohérence département (PRD §7) est conservée.
+                surrogate = self._fallback_dept_cp(dept, cp.value, encrypted_idx)
+            reserved.add(surrogate)
             out[id(cp)] = (surrogate, encrypted_idx)
         return out
 
-    def _coupled_dept(self, cp: Span, communes: list[Span], gaz) -> str | None:
-        """Département de la commune substituée couplée au CP, ou None.
+    def _fallback_dept_cp(self, dept: str, cp_clear: str, encrypted_idx: int) -> str:
+        """Dernier recours CP : ``dept + 3 chiffres`` depuis l'indice chiffré.
 
-        Chiffre la commune pour obtenir son substitut, puis lit le département
-        du substitut dans le gazetteer. Retourne None si aucune commune couplée
-        ou si le substitut est inconnu du gazetteer.
+        Domaine de secours (1000 par département) utilisé quand la liste des CP
+        valides du département est saturée dans le scope courant (D46f,
+        injectivité avant validité base en cas de saturation). Sondage linéaire
+        conservé (collision/point fixe), comme en S4.
+        """
+        prefix = _cp_prefix(dept)
+        suffix_len = 5 - len(prefix)
+        base_suffix = encrypted_idx % (10**suffix_len)
+        for probe in range(10**suffix_len):
+            suffix = (base_suffix + probe) % (10**suffix_len)
+            cand = prefix + str(suffix).zfill(suffix_len)
+            if cand == cp_clear:
+                continue
+            if self._registry.contains(cand):
+                continue
+            return cand
+        return prefix + str(base_suffix).zfill(suffix_len)
+
+    def _coupled_commune(self, cp: Span, communes: list[Span], gaz) -> str | None:
+        """Nom (substitué) de la commune couplée la plus proche du CP, ou None.
+
+        Chiffre la commune pour obtenir son substitut, puis vérifie que le
+        substitut est connu du gazetteer (pour lire ``departement`` et
+        ``code_commune``). Retourne None si aucune commune couplée ou si le
+        substitut est inconnu du gazetteer.
         """
         if not communes:
             return None
@@ -690,7 +773,64 @@ class Engine:
         commune_sub = self._encrypt_span(best)
         if commune_sub is None or commune_sub.casefold() not in gaz:
             return None
-        return gaz[commune_sub.casefold()].departement
+        return commune_sub
+
+    def _probe_cp(
+        self,
+        dept: str,
+        candidates: list[str],
+        base: str,
+        clear_cp: str,
+        reserved: set[str],
+    ) -> str | None:
+        """Sondage linéaire dans la liste triée des CP valides du dept (D46f).
+
+        Départ à l'index de ``base`` (le CP de la commune substituée ou le CP
+        HMAC du chemin trigger-only), parcours croissant avec bouclage, saute
+        le point fixe (``== clear_cp``), les CP déjà attribués dans le registre
+        et les CP réservés dans la passe courante. Retourne None si tout est
+        pris (département saturé). Index de départ O(1) via ``_CP_IDX_BY_DEPT``
+        (phase 32 M4, perf).
+        """
+        if not candidates:
+            return None
+        idx_map = (_CP_IDX_BY_DEPT or {}).get(dept)
+        i = idx_map.get(base) if idx_map is not None else None
+        if i is None:
+            try:
+                i = candidates.index(base)
+            except ValueError:
+                i = 0
+        n = len(candidates)
+        for k in range(n):
+            cand = candidates[(i + k) % n]
+            if cand == clear_cp:
+                continue
+            if self._registry.contains(cand):
+                continue
+            if cand in reserved:
+                continue
+            return cand
+        return None
+
+    def _random_dept_cp(self, dept: str, cp_clear: str, candidates: list[str]) -> str | None:
+        """CP valide du département ``dept`` choisi par HMAC (trigger-only, D46f).
+
+        Sélectionné dans la liste triée des CP valides de ce département
+        (ordre croissant), déterministe par (clé, scope, dept, clair).
+        """
+        if not candidates:
+            return None
+        msg = (
+            self._scope.encode("utf-8")
+            + b"\x00code_postal_cp\x00"
+            + dept.encode("utf-8")
+            + b"\x00"
+            + cp_clear.encode("utf-8")
+        )
+        digest = hmac.new(self._key, msg, hashlib.sha256).digest()
+        idx = int.from_bytes(digest[:4], "big") % len(candidates)
+        return candidates[idx]
 
     def _random_dept(self, cp_clear: str) -> str:
         """Département aléatoire (HMAC-déterministe), != dept du CP clair."""

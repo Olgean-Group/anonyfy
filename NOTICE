@@ -12,3 +12,11 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+Third-party data
+----------------
+The codes_postaux gazetteer is derived from the La Poste official postal
+codes dataset (dataset "laposte-hexasmal", snapshot frozen at design time,
+35 007 code_commune entries). Licensed under the Licence Ouverte 2.0
+(attribution required). Source:
+https://www.data.gouv.fr/api/1/datasets/r/008a2dda-2c60-4b63-b910-998f6f818089

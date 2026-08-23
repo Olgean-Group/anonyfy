@@ -1,5 +1,11 @@
 {
   "gazetteers": {
+    "codes_postaux": {
+      "count": 35007,
+      "sha256": "c6670627cab4971759c5795371c587e6e680459e676028c2d3bc0c017495ae68",
+      "source": "La Poste - base officielle des codes postaux (dataset laposte-hexasmal), snapshot fige a la conception, Licence Ouverte 2.0 (attribution requise)",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/008a2dda-2c60-4b63-b910-998f6f818089"
+    },
     "communes": {
       "count": 34875,
       "sha256": "857a5906f7418b9bb6be1383883c6b797ae51e004d383e76fc5eadae476e4528",
@@ -25,5 +31,5 @@
       "url": "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv/"
     }
   },
-  "version": "87b86679327aa3a97837007717c13d44d3c56f53dae0d86b9e375b83ac31f0b2"
+  "version": "e7adbcf0d3572f3ee97718b68a8a7f4965426b6704c0c604c70861a8f8e85adb"
 }
