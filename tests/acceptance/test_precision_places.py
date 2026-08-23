@@ -140,9 +140,9 @@ class TestRappelAdresses:
         """
         m = vault.mask("demeurant à Paris")
         assert "Paris" not in m.text, f"« Paris » fuit dans {m.text!r}"
-        assert any(
-            s.type in (EntityType.COMMUNE, EntityType.PATRONYME) for s in m.entities
-        ), f"aucun substitut émis pour « demeurant à Paris » : {m.entities!r}"
+        assert any(s.type in (EntityType.COMMUNE, EntityType.PATRONYME) for s in m.entities), (
+            f"aucun substitut émis pour « demeurant à Paris » : {m.entities!r}"
+        )
 
 
 class TestToponymesProsePreserves:
@@ -151,9 +151,7 @@ class TestToponymesProsePreserves:
     @pytest.mark.parametrize("phrase,token", CAS_PRESERVES)
     def test_token_present(self, vault, phrase: str, token: str) -> None:
         m = vault.mask(phrase)
-        assert token in m.text, (
-            f"le toponyme {token!r} a été masqué dans {phrase!r} : {m.text!r}"
-        )
+        assert token in m.text, f"le toponyme {token!r} a été masqué dans {phrase!r} : {m.text!r}"
         # Aucun span COMMUNE émis pour ce token (il n'est pas une adresse).
         offset = phrase.index(token)
         span = _span_offsets(m, offset)
@@ -230,8 +228,8 @@ class TestDefautSafeD42b:
         """Un COMMUNE à 0.5 AVEC indice enregistré (verbe d'adresse avant)
         n'est pas un candidat nu : il est émis (rappel)."""
         span = Span(
-            start=11,
-            end=16,
+            start=12,
+            end=17,
             type="COMMUNE",
             value="Paris",
             rule_id="gazetteer-commune",

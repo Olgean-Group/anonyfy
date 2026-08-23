@@ -41,7 +41,17 @@ _WINDOW = 40
 
 # Phase 30 — S4: déclencheurs CP (OBJ-REC-109). Un CP est masqué s'il est
 # adjacent à une commune détectée OU précédé d'un de ces déclencheurs.
-_CP_TRIGGERS: tuple[str, ...] = ("à ", "demeurant à ", "habite à ")
+# Phase 42 — P1 (D42f): réconciliation avec la liste des verbes d'adresse
+# (single source of truth) — `domicilié à ` et `résidant à ` ajoutés (ils
+# figuraient déjà aux deux endroits). Divergence justifiée : `à ` nu reste un
+# déclencheur CP (S4) mais PAS un indice COMMUNE (D42c).
+_CP_TRIGGERS: tuple[str, ...] = (
+    "à ",
+    "demeurant à ",
+    "habite à ",
+    "domicilié à ",
+    "résidant à ",
+)
 
 # Fenêtre de proximité entre un CP et une commune (caractères de l'interspace).
 _CP_COMMUNE_WINDOW = 15
@@ -216,13 +226,19 @@ def _cp_near_commune(
     return False
 
 
-def _cp_after_trigger(
-    cp_start: int,
+def _trigger_before(
+    pos: int,
     text: str,
-    triggers: tuple[str, ...] = _CP_TRIGGERS,
-    window: int = _CP_TRIGGER_WINDOW,
+    triggers: tuple[str, ...],
+    window: int,
 ) -> bool:
-    """True si un déclencheur CP se termine dans ``window`` chars avant le CP."""
+    """True si un déclencheur se termine dans ``window`` chars avant ``pos``.
+
+    Générique (phase 42, D42f) : utilisée pour le couplage CP (S4, déclencheurs
+    CP) et par ``engine.py`` pour l'indice COMMUNE (un verbe d'adresse
+    immédiatement avant la commune, D42c). Anciennement ``_cp_after_trigger``
+    (sémantique CP-spécifique trompeuse) — renommée sans changer la logique.
+    """
     for trigger in triggers:
         if not trigger:
             continue
@@ -232,7 +248,7 @@ def _cp_after_trigger(
             if idx < 0:
                 break
             trigger_end = idx + len(trigger)
-            if 0 <= cp_start - trigger_end <= window:
+            if 0 <= pos - trigger_end <= window:
                 return True
             search_from = idx + 1
     return False
@@ -252,7 +268,7 @@ def _detect_coupled_cps(
     coupled: list[Span] = []
     for cp in raw_cps:
         near_commune = _cp_near_commune(cp.start, cp.end, commune_spans)
-        triggered = _cp_after_trigger(cp.start, text)
+        triggered = _trigger_before(cp.start, text, _CP_TRIGGERS, _CP_TRIGGER_WINDOW)
         if not near_commune and not triggered:
             continue
         rule = "cp-commune" if near_commune else "cp-trigger"
