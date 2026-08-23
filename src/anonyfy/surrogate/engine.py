@@ -148,7 +148,62 @@ def _is_pure_patronyme(span: Span) -> bool:
     return first not in load_prenoms()
 
 
-def _is_bare_candidate(span: Span, text: str) -> bool:
+# Phase 42 — P1 (D42b/D42c/D42d/D42f): indices contextuels d'adresse pour les
+# spans faibles (confidence < 0.8). Un span COMMUNE/VOIE faible n'est émis en
+# permissive que s'il porte un indice d'adresse fort ; un type faible sans
+# indice enregistré n'est PAS émis (défaut SAFE, D42b).
+#
+# Verbes d'adresse (indice COMMUNE, D42c) — réconciliés avec
+# ``places._CP_TRIGGERS`` (single source of truth, D42f : ``domicilié à `` et
+# ``résidant à `` y ont été ajoutés). Divergence justifiée : ``à `` nu reste un
+# déclencheur CP (S4) mais PAS un indice COMMUNE ; ``adresse : `` est un indice
+# COMMUNE mais pas un déclencheur CP.
+_ADDRESS_VERBS: tuple[str, ...] = (
+    "domicilié à ",
+    "demeurant à ",
+    "habite à ",
+    "résidant à ",
+    "adresse : ",
+)
+# Fenêtre (caractères) entre la fin du verbe d'adresse et le début de la
+# commune : « immédiatement avant » (D42c) = au plus une espace blanche.
+_ADDRESS_VERB_WINDOW: int = 1
+
+# Types de voie en tête d'un span VOIE (indice (a), D42d).
+_VOIE_TYPE_WORDS: frozenset[str] = frozenset(
+    {"rue", "avenue", "boulevard", "chemin", "impasse", "place"}
+)
+# Numéro de rue en tête (indice (b), D42d) : une séquence de 1-4 chiffres se
+# terminant immédiatement avant le span (« 12 rue de la Paix »). ``\s*$`` borne
+# l'écart à une espace blanche (immédiatement avant).
+_NUMERO_VOIE_RE = re.compile(r"(?<!\d)(\d{1,4})\s*$")
+
+
+def _commune_a_indice_adresse(span: Span, text: str, cps: list[Span]) -> bool:
+    """True si le span COMMUNE faible porte un indice d'adresse fort (D42c/D42f).
+
+    (a) un verbe d'adresse se termine immédiatement avant le span
+    (``places._trigger_before`` réutilisée, D42f) ; (b) un code postal est
+    adjacent au span (``places._cp_near_commune``, D42f).
+    """
+    if places._trigger_before(span.start, text, _ADDRESS_VERBS, _ADDRESS_VERB_WINDOW):
+        return True
+    return any(places._cp_near_commune(cp.start, cp.end, [span]) for cp in cps)
+
+
+def _voie_a_indice(span: Span, text: str) -> bool:
+    """True si le span VOIE faible porte un indice (D42d).
+
+    (a) le premier mot du span (casefold) est un type de voie ; (b) un numéro
+    de rue (1-4 chiffres) se termine immédiatement avant le span.
+    """
+    first = span.value.split()[0].casefold()
+    if first in _VOIE_TYPE_WORDS:
+        return True
+    return bool(_NUMERO_VOIE_RE.search(text[: span.start]))
+
+
+def _is_bare_candidate(span: Span, text: str, cps: list[Span] | None = None) -> bool:
     """True si ``span`` est un candidat nu à rejeter au masquage non-observe.
 
     Phase 34 — R1 (D34b): un candidat gazetteer seul, sans déclencheur
@@ -156,8 +211,8 @@ def _is_bare_candidate(span: Span, text: str) -> bool:
     rappel s'est effondré (R3, recette 0.1.3 : 1,4 % hors contexte).
 
     Phase 38 — R3 (D38b/D38d/D38e) : le rejet est restreint à la position
-    d'initiale de phrase (la position ambiguë), et s'y applique à PATRONYME et
-    PRENOM : un PATRONYME pur (absent du gazetteer prénoms) est émis (non
+    d'initiale de phrase (la position ambiguë), et s'y applique à la PATRONYME
+    et au PRENOM : un PATRONYME pur (absent du gazetteer prénoms) est émis (non
     ambigu), un PRENOM ou un token ambigu (PRENOM ET PATRONYME) reste rejeté.
 
     Milieu de phrase (position non ambiguë) : un candidat nu isolé
@@ -165,19 +220,47 @@ def _is_bare_candidate(span: Span, text: str) -> bool:
     -> Paul masqué). Les faux positifs du corpus négatif (sociétés, lieux,
     voies) sont traités au cas par cas à la détection (marqueurs non personne
     dans triggers.py, arbitrage VOIE), pas en filtrant tous les nus.
+
+    Phase 42 — P1 (D42b/D42c/D42d): généralisation. Un span à ``confidence <
+    _BARE_CONFIDENCE_THRESHOLD`` n'est émis en permissive QUE s'il porte un
+    indice contextuel enregistré pour son type ; un type sans indice enregistré
+    est filtré par défaut (défaut SAFE) :
+    - PATRONYME/PRENOM : comportement D38b/D38e ci-dessus (position d'initiale
+      de phrase), inchangé ;
+    - COMMUNE : verbe d'adresse immédiatement avant ou code postal adjacent
+      (D42c, ``_commune_a_indice_adresse``) ;
+    - VOIE : type de voie en tête du span ou numéro de rue avant (D42d,
+      ``_voie_a_indice``) ;
+    - autre type sans indice enregistré : défaut SAFE (filtré).
+    ``cps`` : les spans CODE_POSTAL déjà résolus (indice CP adjacent).
     """
-    if span.type not in (EntityType.PATRONYME, EntityType.PRENOM):
-        return False
-    if span.rule_id not in _BARE_RULES:
-        return False
     if span.confidence >= _BARE_CONFIDENCE_THRESHOLD:
         return False
-    if not _at_sentence_initial(text, span.start):
-        return False
-    # Position ambiguë (initiale) : seul un PATRONYME pur est émis (D38e).
-    if span.type == EntityType.PATRONYME and _is_pure_patronyme(span):
-        return False
+    if span.type in (EntityType.PATRONYME, EntityType.PRENOM):
+        if span.rule_id not in _BARE_RULES:
+            return False
+        if not _at_sentence_initial(text, span.start):
+            return False
+        # Position ambiguë (initiale) : seul un PATRONYME pur est émis (D38e).
+        if span.type == EntityType.PATRONYME and _is_pure_patronyme(span):
+            return False
+        return True
+    if span.type == EntityType.COMMUNE:
+        return not _commune_a_indice_adresse(span, text, cps if cps is not None else [])
+    if span.type == EntityType.VOIE:
+        return not _voie_a_indice(span, text)
+    # Défaut SAFE (D42b) : un type faible sans indice enregistré n'est pas émis.
     return True
+
+
+def _filter_bare_candidates(spans: list[Span], text: str) -> list[Span]:
+    """D42b : filtre au masquage non-observe les candidats nus de tous types.
+
+    L'invariant généralisé « aucun span à confidence < 0.8 sans indice, quel
+    que soit le type » est posé ici, une seule fois, dans la règle d'émission.
+    """
+    cps = [s for s in spans if s.type == EntityType.CODE_POSTAL]
+    return [s for s in spans if not _is_bare_candidate(s, text, cps)]
 
 
 # Phase 30 — S4: Permutation keyée sur [0, 100000) pour les CP (5 chiffres).
@@ -274,16 +357,16 @@ class Engine:
             entities = tuple(resolved)
             return MaskedText(text=text, entities=entities)
 
-        # Phase 34 — R1 (D34b/D34c/D34e) + Phase 38 — R3 (D38b/D38d/D38e):
-        # filtrage des candidats nus au niveau du masquage non-observe, restreint
-        # à la position d'initiale de phrase. Un PATRONYME pur en initiale est
-        # émis (D38e) ; un PRENOM ou token ambigu en initiale est rejeté ; un
-        # candidat isolé en milieu de phrase (hors couple D38a / position
-        # structurelle D38c, déjà à >= 0.8) est rejeté. Les spans déclenchés
-        # (confidence >= 0.8, ex. « M. Jean », « M. Dupont ») restent masqués.
-        # observe (plus haut) et la policy strict (Vault.mask, qui détecte en
-        # amont) voient encore ces spans faibles.
-        resolved = [s for s in resolved if not _is_bare_candidate(s, text)]
+        # Phase 34 — R1 (D34b/D34c/D34e) + Phase 38 — R3 (D38b/D38d/D38e) +
+        # Phase 42 — P1 (D42b/D42c/D42d): filtrage des candidats nus au niveau
+        # du masquage non-observe. Un span à confidence < 0.8 n'est émis que
+        # s'il porte un indice contextuel pour son type (défaut SAFE, D42b).
+        # Un PATRONYME pur en initiale est émis (D38e) ; un PRENOM ou un token
+        # ambigu en initiale est rejeté ; un COMMUNE/VOIE faible n'est émis que
+        # sur indice d'adresse fort (verbe d'adresse, CP adjacent, type de
+        # voie, numéro de rue). Les spans déclenchés (confidence >= 0.8) et
+        # observe/strict (Vault.mask, qui détecte en amont) restent inchangés.
+        resolved = _filter_bare_candidates(resolved, text)
 
         substitutions: list[tuple[int, int, str, EntityType]] = []
         # Phase 30 — S4: pré-calcul des substituts CP composites (dépendent du
