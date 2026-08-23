@@ -1,3 +1,56 @@
+## 0.1.5 (2026-08-23)
+
+Correctifs recette 0.1.4 (phases 42-43) : précision COMMUNE/VOIE par indices
+stricts (D42c, D-commune-strict S5), corpus négatif régénéré par intersection
+mots courants x gazetteers, généralisation de la règle de confiance (aucun
+span < 0.8 en `permissive` sans indice contextuel, quel que soit le type,
+défaut SAFE). Aucun changement d'API publique. Limitation annoncée : les
+communes sans indice d'adresse fort (prose, en-têtes de lettre) ne sont pas
+masquées en `permissive`. Tag v0.1.5 et publication PyPI réservés à
+l'orchestrateur.
+
+### D42 (phase 42) - Précision COMMUNE/VOIE par indices stricts
+
+- **Avant** : une commune ou une voie pouvait être émise sur la seule
+  présence dans le gazetteer, sans indice contextuel d'adresse ; des
+  toponymes de prose (« Je vais à Paris ») pouvaient être masqués à tort.
+- **Après** : indices stricts exigés (D42c, D-commune-strict S5) : pour
+  COMMUNE, un verbe d'adresse (`domicilié à`, `habite à`, `réside à`) ou un
+  code postal adjacent ; pour VOIE, un type de voie (rue, avenue,
+  boulevard...) accompagné d'un numéro. Le mode `observe` continue de montrer
+  ces candidats sans les émettre ; `strict` les lève.
+- Contre-exemples D39d obsoletes (phases 34-36) mis à jour pour refléter la
+  règle stricte (phase 42) : les communes en prose sans indice d'adresse
+  fort sont préservées.
+
+### D43 (phase 43) - Corpus négatif régénéré
+
+- Le corpus négatif est désormais auto-généré par intersection des mots
+  courants avec les 4 gazetteers (prénoms, patronymes, communes, voies) :
+  précision 1.000, et il se régénère automatiquement quand les gazetteers
+  changent (script `scripts/build_gazetteers.py`), au lieu d'une liste
+  figée maintenue à la main.
+
+### Règle de confiance généralisée (phase 42)
+
+- **Avant** : le seuil `WEAK_CONFIDENCE_THRESHOLD = 0.8` ne s'appliquait
+  qu'à certains types (PATRONYME, PRENOM) ; des spans à confiance plus basse
+  d'autres types pouvaient encore être émis en `permissive` sans indice
+  contextuel.
+- **Après** : aucun span à confiance < 0.8 n'est émis en `permissive` sans
+  indice contextuel, quel que soit le type de la span. Le mode par défaut
+  SAFE filtre ces candidats par défaut ; `observe` les montre, `strict` les
+  lève avec erreur.
+
+### Limitation annoncée - Communes sans indice d'adresse fort
+
+- En `permissive`, les communes sans indice d'adresse fort ne sont pas
+  masquées : toponymes de prose (« Je vais à Paris ») et en-têtes de lettre
+  (« Paris, le 23 août ») sont préservés.
+- Un utilisateur soucieux de masquer la commune de résidence emploie le mode
+  `strict` ou fournit un verbe d'adresse explicite (`domicilié à`,
+  `habite à`), ce qui lève l'indice requis et permet le masquage.
+
 ## 0.1.4 (2026-08-23)
 
 Correctifs recette 0.1.3 (phases 38-40) : rappel patronymes >= 98 % en
