@@ -56,6 +56,15 @@ FORBIDDEN: tuple[str, ...] = (
     "raw/",
 )
 
+# Membres obligatoires dans la distribution (phase 48). Le schéma normatif
+# ``anonyfy.report.v1`` est la raison d'être du contrat public: un artefact qui
+# ne l'embarque pas est inutilisable par ``anonyfy-audit``. Le chemin est
+# comparé en sous-chaîne, donc présent dans la wheel (``anonyfy/schemas/...``)
+# comme dans la sdist (``anonyfy-<v>/src/anonyfy/schemas/...``).
+REQUIRED: tuple[str, ...] = (
+    "anonyfy/schemas/anonyfy.report.v1.schema.json",
+)
+
 
 def _members(path: Path) -> list[str]:
     """Liste les membres d'une archive sdist (.tar.gz) ou wheel (.whl)."""
@@ -97,17 +106,25 @@ def main() -> int:
     args = parser.parse_args()
 
     bad: list[str] = []
+    missing: list[str] = []
     for raw in args.paths:
         path = Path(raw)
         if not path.is_file():
             print(f"erreur: artefact introuvable: {path}", file=sys.stderr)
             return 2
-        for name in _members(path):
+        members = _members(path)
+        for name in members:
             if _is_forbidden(name):
                 bad.append(f"{path.name}: {name}")
+        for required in REQUIRED:
+            if not any(required in name for name in members):
+                missing.append(f"{path.name}: {required}")
 
     if bad:
         print("membres interdits dans la distribution:", *bad, sep="\n")
+        return 1
+    if missing:
+        print("membres obligatoires absents de la distribution:", *missing, sep="\n")
         return 1
     return 0
 
