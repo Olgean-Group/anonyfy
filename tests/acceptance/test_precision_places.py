@@ -63,6 +63,7 @@ CAS_FAUX_POSITIFS: tuple[tuple[str, tuple[EntityType, ...]], ...] = (
 # --- Critère 1 : rappel — les vraies communes/voies en contexte d'adresse restent
 # masquées (token -> type attendu). Le type et l'invariant F3 sont vérifiés.
 CAS_RAPPEL: tuple[tuple[str, str, EntityType], ...] = (
+    ("demeurant à Paris", "Paris", EntityType.COMMUNE),
     ("domicilié à Paris", "Paris", EntityType.COMMUNE),
     ("habite à Lyon", "Lyon", EntityType.COMMUNE),
     ("16000 Angoulême", "Angoulême", EntityType.COMMUNE),
@@ -129,21 +130,56 @@ class TestRappelAdresses:
         )
 
     def test_demeurant_a_paris_masque(self, vault) -> None:
-        """Rappel : « demeurant à Paris » -> Paris est masqué (le clair ne
-        franchit pas la frontière, invariant 1).
+        """Rappel durci (REV-MAJ-1) : « demeurant à Paris » -> Paris est typé
+        COMMUNE et substitué par une commune (F3-type tenu).
 
-        NB : le span émis pour « Paris » est PATRONYME, pas COMMUNE : le
-        déclencheur TRIGGERS « demeurant » (phase 12) le booste comme patronyme
-        (confidence 0.9) et l'arbitrage S3 retire la commune chevauchante. Ce
-        typage relève de la détection/arbitrage (hors périmètre D42a, qui ne
-        change que la règle d'émission) ; l'indice COMMUNE (D42c) s'applique
-        aux spans qui gagnent l'arbitrage en COMMUNE. Le point de sûreté (le
-        clair est remplacé) est vérifié ici.
+        Le déclencheur TRIGGERS « demeurant » (phase 12) boostait « Paris »
+        comme patronyme (0.9) et l'arbitrage S3 retirait la commune
+        chevauchante : un token ambigui (patronyme + commune) en contexte
+        d'adresse était rendu PATRONYME, violant F3-type. L'indice d'adresse
+        « demeurant à » doit primer sur le déclencheur patronyme nu.
+
+        NB : le point de sûreté (le clair est remplacé) reste vérifié ; le
+        durcissement porte sur le TYPE (COMMUNE, mask-commune).
         """
         m = vault.mask("demeurant à Paris")
         assert "Paris" not in m.text, f"« Paris » fuit dans {m.text!r}"
-        assert any(s.type in (EntityType.COMMUNE, EntityType.PATRONYME) for s in m.entities), (
-            f"aucun substitut émis pour « demeurant à Paris » : {m.entities!r}"
+        communes = [s for s in m.entities if s.type == EntityType.COMMUNE]
+        assert len(communes) == 1, (
+            f"« demeurant à Paris » doit émettre 1 span COMMUNE, reçu {m.entities!r}"
+        )
+        assert communes[0].rule_id == "mask-commune", (
+            f"F3 violé : substitut {communes[0].rule_id!r} ≠ 'mask-commune'"
+        )
+        assert not any(s.type == EntityType.PATRONYME for s in m.entities), (
+            f"« Paris » ne doit plus être typé PATRONYME : {m.entities!r}"
+        )
+
+    def test_demeurant_a_paris_observe_emet_commune(self, vault) -> None:
+        """Le mode observation (detect) doit voir la COMMUNE, pas le faux
+        PATRONYME : le typage ne dépend pas du chemin mask/observe (REV-MAJ-1)."""
+        m = vault.mask("demeurant à Paris", observe=True)
+        span = _span_offsets(m, 12)
+        assert span is not None, f"aucun span pour 'Paris' : {m.entities!r}"
+        assert span.type == EntityType.COMMUNE, (
+            f"'Paris' typé {span.type.value} en observe (attendu COMMUNE)"
+        )
+        assert span.rule_id == "gazetteer-commune", (
+            f"règle {span.rule_id!r} (attendu 'gazetteer-commune')"
+        )
+
+    def test_titre_patronyme_conserve_le_typage(self, vault) -> None:
+        """Bornage : un patronyme précédé d'un TITRE reste PATRONYME.
+
+        « M. Paris » est une personne nommée Paris (gazetteer noms) : le
+        correctif ne s'applique qu'aux candidats immédiatement précédés d'un
+        verbe d'adresse (REV-MAJ-1 borné), pas aux titres.
+        """
+        m = vault.mask("M. Paris")
+        types = {s.type for s in m.entities}
+        assert EntityType.PATRONYME in types, f"« M. Paris » doit rester PATRONYME : {m.entities!r}"
+        assert EntityType.COMMUNE not in types, (
+            f"« M. Paris » ne doit pas devenir COMMUNE : {m.entities!r}"
         )
 
 
