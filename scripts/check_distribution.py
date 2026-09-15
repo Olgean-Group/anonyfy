@@ -61,9 +61,7 @@ FORBIDDEN: tuple[str, ...] = (
 # ne l'embarque pas est inutilisable par ``anonyfy-audit``. Le chemin est
 # comparé en sous-chaîne, donc présent dans la wheel (``anonyfy/schemas/...``)
 # comme dans la sdist (``anonyfy-<v>/src/anonyfy/schemas/...``).
-REQUIRED: tuple[str, ...] = (
-    "anonyfy/schemas/anonyfy.report.v1.schema.json",
-)
+REQUIRED: tuple[str, ...] = ("anonyfy/schemas/anonyfy.report.v1.schema.json",)
 
 
 def _members(path: Path) -> list[str]:

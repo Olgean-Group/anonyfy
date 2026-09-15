@@ -74,16 +74,19 @@ def _make_wheel(path: Path, members: dict[str, bytes]) -> Path:
     return path
 
 
+SCHEMA_MEMBER = "anonyfy.report.v1.schema.json"
+SCHEMA_BYTES = b'{"$id": "urn:anonyfy:report:v1"}\n'
+
 CLEAN_SDIST = {
     "anonyfy-0.1.0/src/anonyfy/__init__.py": b'__version__ = "0.1.0"\n',
-    "anonyfy-0.1.0/src/anonyfy/schemas/anonyfy.report.v1.schema.json": b'{"$id": "urn:anonyfy:report:v1"}\n',
+    f"anonyfy-0.1.0/src/anonyfy/schemas/{SCHEMA_MEMBER}": SCHEMA_BYTES,
     "anonyfy-0.1.0/LICENSE": b"Apache-2.0\n",
     "anonyfy-0.1.0/README.md": b"# anonyfy\n",
 }
 
 CLEAN_WHEEL = {
     "anonyfy/__init__.py": b'__version__ = "0.1.0"\n',
-    "anonyfy/schemas/anonyfy.report.v1.schema.json": b'{"$id": "urn:anonyfy:report:v1"}\n',
+    f"anonyfy/schemas/{SCHEMA_MEMBER}": SCHEMA_BYTES,
     "anonyfy-0.1.0.dist-info/METADATA": b"Metadata-Version: 2.1\n",
 }
 
