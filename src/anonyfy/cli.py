@@ -60,6 +60,7 @@ __all__ = ["build_parser", "main"]
 
 # Bornes du contrat public v1 (schéma normatif anonyfy.report.v1).
 MAX_DOCUMENTS = 50
+MAX_CHARACTERS_TOTAL = 50_000_000
 # Scope interne fixe du scan JSON: jamais exposé, jamais persisté.
 _JSON_SCOPE = "scan-observation"
 
@@ -282,6 +283,7 @@ def _cmd_scan_json(args: argparse.Namespace, out_stream: IO[str], err_stream: IO
         return 1
 
     builder = ObservationReportBuilder(confidence_threshold=WEAK_CONFIDENCE_THRESHOLD)
+    accumulated_characters = 0
     with tempfile.TemporaryDirectory(prefix="anonyfy-observation-") as workdir:
         vault = Vault(
             key=secrets.token_bytes(16),
@@ -301,6 +303,14 @@ def _cmd_scan_json(args: argparse.Namespace, out_stream: IO[str], err_stream: IO
                     return 1
                 except OSError as exc:
                     print(f"erreur: lecture du fichier d'entrée échouée: {exc}", file=err_stream)
+                    return 1
+                accumulated_characters += len(text)
+                if accumulated_characters > MAX_CHARACTERS_TOTAL:
+                    print(
+                        f"erreur: corpus de {accumulated_characters} caractères; le contrat "
+                        f"v1 accepte au plus {MAX_CHARACTERS_TOTAL} au total",
+                        file=err_stream,
+                    )
                     return 1
                 result = vault.mask(text, observe=True)
                 # Seuls la taille et les spans sont transmis: ni texte, ni chemin.

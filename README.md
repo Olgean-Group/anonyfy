@@ -45,10 +45,22 @@ v.report()                          # journal exploitable par un DPO
 ```
 
 ```
-anonyfy scan dossier/*.txt          # mode observation : détecte, ne modifie rien
+anonyfy scan fichier.txt                          # mode observation : détecte, ne modifie rien
+anonyfy scan dossier/*.txt --format json --out rapport.json   # corpus -> contrat v1
 anonyfy mask fichier.txt --scope d1234
 anonyfy unmask reponse.txt --scope d1234
 ```
+
+`scan --format json` accepte 1 à 50 fichiers et produit le contrat public
+`anonyfy.report.v1` : agrégats et codes contrôlés uniquement (aucun nom de
+fichier, aucune valeur source, aucun clair, aucun substitut). Le mode JSON
+utilise une clé éphémère et ne crée aucun registre persistant ; il refuse
+`--scope`, `--registry`, `--audit`, `--key` et `--key-file`. Le format par
+défaut reste `markdown` (mono-fichier, clé et registre historiques).
+
+Le schéma normatif est embarqué dans le paquet et lisible par
+`anonyfy.schemas.load_report_schema()` (`$id: urn:anonyfy:report:v1`, JSON
+Schema draft 2020-12).
 
 `mask_json` / `unmask_json` parcourent un payload JSON et ne masquent que
 les feuilles chaîne (jamais les clés, jamais `function.name`). C'est une

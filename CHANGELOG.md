@@ -1,3 +1,42 @@
+## 0.1.7 (2026-09-15)
+
+Contrat public de rapport d'observation `anonyfy.report.v1` (phase 48) : le
+schéma normatif est désormais packagé et publié par `anonyfy`, et `scan`
+accepte un corpus multi-fichiers avec une sortie JSON agrégat-seul en mode
+observation. Aucun changement de sémantique de détection, de substitution ou de
+démasquage ; aucune clé, aucun registre, aucun nom de fichier ni aucune valeur
+source ne franchit la sortie JSON. `Vault.report()` et le scan Markdown
+mono-fichier restent inchangés.
+
+### Contrat public `anonyfy.report.v1`
+
+- **Schéma normatif packagé** : `src/anonyfy/schemas/anonyfy.report.v1.schema.json`
+  (JSON Schema draft 2020-12, `$id: urn:anonyfy:report:v1`), accessible par
+  `anonyfy.schemas.load_report_schema()`. Il devient la source normative pour
+  les consommateurs (dont `anonyfy-audit`) au lieu d'une copie locale.
+- **Agrégats uniquement** : version de schéma, producteur et version, horodatage,
+  mode observation, seuil de confiance, comptes de documents/caractères/occurrences,
+  résumés par type d'entité (comptes, confiance haute/basse, `rule_ids`),
+  codes d'avertissement contrôlés (`LOW_CONFIDENCE_OCCURRENCES`,
+  `EMPTY_DOCUMENTS`, `UNSUPPORTED_CONTENT`), empreinte gazetteer. Aucun nom de
+  fichier, chemin, excerpt, clair, substitut, scope, empreinte de document ni
+  métadonnée libre : chaque objet fixe `additionalProperties` à `false`.
+
+### Scan JSON multi-fichiers
+
+- **Commande** : `anonyfy scan FILE [FILE ...] --format json --out rapport.json`
+  (1 à 50 documents, jusqu'à 50 000 000 caractères cumulés).
+- **Mode observation sans état** : clé éphémère non exportée, registre dans un
+  répertoire temporaire supprimé en fin d'exécution. Le mode JSON refuse
+  explicitement `--scope`, `--registry`, `--audit`, `--key` et `--key-file` :
+  aucune configuration opérateur ne peut introduire un état ou un journal
+  persistants.
+- **Rétrocompatibilité** : `--format markdown` reste le défaut ; le scan
+  Markdown mono-fichier et `Vault.report()` gardent leur comportement et leur
+  clé/registre historiques.
+- **Garde-fou de packaging** : `scripts/check_distribution.py` exige désormais
+  le schéma dans les artefacts wheel et sdist.
+
 ## 0.1.6 (2026-08-23)
 
 Correctifs recette 0.1.5 (phases 45-46) : formule « Fait à … » corrigée (R5,

@@ -247,9 +247,15 @@ def test_scan_json_rejects_invalid_utf8_without_output(tmp_path):
     assert "UTF-8" in err_stream.getvalue() or "encodage" in err_stream.getvalue()
 
 
-def test_scan_json_rejects_document_larger_than_contract_bound(tmp_path):
+def test_scan_json_rejects_corpus_larger_than_contract_bound(tmp_path):
+    """Borne du schéma v1: character_count <= 50 000 000 au TOTAL.
+
+    Fichier creux (truncate): le chemin de code lit bien 50 000 001 octets
+    mais le disque n'en alloue aucun, ce qui garde le test rapide.
+    """
     huge = tmp_path / "huge.txt"
-    huge.write_text("a" * (50_000_000 + 1), encoding="utf-8")
+    with huge.open("wb") as handle:
+        handle.truncate(50_000_001)
     output = tmp_path / "report.json"
     err_stream = io.StringIO()
 
@@ -257,7 +263,7 @@ def test_scan_json_rejects_document_larger_than_contract_bound(tmp_path):
 
     assert rc != 0
     assert not output.exists()
-    assert "50" in err_stream.getvalue()
+    assert "50000000" in err_stream.getvalue()
 
 
 def test_scan_json_reports_output_write_failure(tmp_path):
