@@ -247,6 +247,19 @@ def test_scan_json_rejects_invalid_utf8_without_output(tmp_path):
     assert "UTF-8" in err_stream.getvalue() or "encodage" in err_stream.getvalue()
 
 
+def test_scan_json_rejects_document_larger_than_contract_bound(tmp_path):
+    huge = tmp_path / "huge.txt"
+    huge.write_text("a" * (50_000_000 + 1), encoding="utf-8")
+    output = tmp_path / "report.json"
+    err_stream = io.StringIO()
+
+    rc = main(["scan", str(huge), "--format", "json", "--out", str(output)], err=err_stream)
+
+    assert rc != 0
+    assert not output.exists()
+    assert "50" in err_stream.getvalue()
+
+
 def test_scan_json_reports_output_write_failure(tmp_path):
     file1 = _write(tmp_path / "a.txt", f"SIRET {SIRET}\n")
     output = tmp_path / "report.json"
