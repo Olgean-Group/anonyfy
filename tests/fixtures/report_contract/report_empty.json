@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "producer": {
+    "name": "anonyfy",
+    "version": "0.1.7"
+  },
+  "generated_at": "2026-09-15T10:00:00Z",
+  "observation": {
+    "mode": "observation",
+    "confidence_threshold": 0.8,
+    "document_count": 0,
+    "character_count": 0,
+    "total_occurrence_count": 0,
+    "types": [],
+    "warnings": []
+  },
+  "gazetteer_version": "e7adbcf0d3572f3ee97718b68a8a7f4965426b6704c0c604c70861a8f8e85adb"
+}

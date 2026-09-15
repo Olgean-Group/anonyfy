@@ -130,9 +130,14 @@ def test_check_distribution_rejects_raw_in_sdist(tmp_path: Path) -> None:
 
 
 def test_check_distribution_allows_gzipped_gazetteers(tmp_path: Path) -> None:
-    """Les .csv.gz compressés (hors raw/) restent autorisés: seuls raw/ est exclu."""
+    """Les .csv.gz compressés (hors raw/) restent autorisés: seuls raw/ est exclu.
+
+    Le membre obligatoire du schéma (phase 48) est inclus pour que ce test
+    n'échoue que sur son objet: l'autorisation des .csv.gz.
+    """
     members = {
         "anonyfy/__init__.py": b'__version__ = "0.1.0"\n',
+        "anonyfy/schemas/anonyfy.report.v1.schema.json": b'{"$id": "urn:anonyfy:report:v1"}\n',
         "anonyfy-0.1.0.dist-info/METADATA": b"Metadata-Version: 2.1\n",
         "anonyfy/detect/gazetteers/data/noms.csv.gz": b"\x1f\x8b\x08\x00",
     }

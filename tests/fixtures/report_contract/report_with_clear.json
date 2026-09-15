@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "producer": {
+    "name": "anonyfy",
+    "version": "0.1.7"
+  },
+  "generated_at": "2026-09-15T10:00:00Z",
+  "observation": {
+    "mode": "observation",
+    "confidence_threshold": 0.8,
+    "document_count": 1,
+    "character_count": 120,
+    "total_occurrence_count": 1,
+    "types": [],
+    "warnings": [],
+    "documents": [
+      {
+        "filename": "dossier-jean-dupont.txt",
+        "excerpt": "Jean Dupont"
+      }
+    ],
+    "examples": [
+      {
+        "clear": "Jean Dupont",
+        "surrogate": "Marc Leroy"
+      }
+    ]
+  },
+  "gazetteer_version": "e7adbcf0d3572f3ee97718b68a8a7f4965426b6704c0c604c70861a8f8e85adb"
+}

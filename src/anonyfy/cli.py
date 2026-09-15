@@ -6,6 +6,8 @@ CLI stdlib (``argparse``, zéro dépendance) conforme au PRD §4 et à D11
 Sous-commandes:
   - ``scan <fichier>``: produit un rapport (``Vault.report()``) sans modifier
     le fichier d'entrée. Sortie sur stdout ou ``--out``.
+  - ``scan FILE [FILE ...] --format json`` (phase 48): produit le contrat
+    public ``anonyfy.report.v1`` en mode observation, agrégats uniquement.
   - ``mask <fichier> --scope <s> --out <out>``: masque les identifiants et
     écrit le résultat dans ``--out``.
   - ``unmask <fichier> --scope <s> --key-file <p> --out <out>``: restitue le
@@ -21,26 +23,45 @@ Sécurité de la clé (D11, CRITIQUE):
     (peut fuiter vers les sous-processus).
   - La clé hex doit faire 32 hex chars (16 octets).
 
+Mode JSON (phase 48): aucune clé n'est demandée ni acceptée. Une clé éphémère
+(``secrets.token_bytes(16)``) et un registre dans un répertoire temporaire
+supprimé en fin d'exécution garantissent qu'aucun état persistant n'est créé.
+``--scope``, ``--registry`` et ``--audit`` sont refusés dans ce mode: ils
+impliqueraient un état ou un journal persistants incompatibles avec un rapport
+d'agrégats sans donnée source.
+
 Le registre est persistant entre invocations (D11/D4): ``--registry <path>``
 ou défaut ``~/.anonyfy/registries/<scope>.db``. Le clair n'est jamais loggé ni
 affiché (invariant 1); le registre ne stocke jamais de clair (D4).
 
-Référence: PLAN.md phase 16, DECISIONS.md D11/D4.
+Référence: PLAN.md phase 16, DECISIONS.md D11/D4, phase 48 (contrat public).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import secrets
 import sys
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
+from anonyfy import __version__
 from anonyfy.audit import AuditLog
+from anonyfy.detect.gazetteers.loader import gazetteer_version
+from anonyfy.observation_report import ObservationReportBuilder
 from anonyfy.surrogate.registry import default_registry_path
-from anonyfy.vault import Vault
+from anonyfy.vault import WEAK_CONFIDENCE_THRESHOLD, Vault
 
 __all__ = ["build_parser", "main"]
+
+# Bornes du contrat public v1 (schéma normatif anonyfy.report.v1).
+MAX_DOCUMENTS = 50
+# Scope interne fixe du scan JSON: jamais exposé, jamais persisté.
+_JSON_SCOPE = "scan-observation"
 
 
 def _parse_hex_key(hex_str: str, err_stream: IO[str]) -> bytes | None:
@@ -143,16 +164,36 @@ def _read_input(path: str, err_stream: IO[str]) -> str | None:
 
 
 def _cmd_scan(args: argparse.Namespace, out_stream: IO[str], err_stream: IO[str]) -> int:
-    """scan: produit un rapport (Vault.report()) sans modifier le fichier d'entrée.
+    """scan: produit un rapport sans modifier les fichiers d'entrée.
 
-    Le fichier d'entrée est seulement lu. Le rapport est écrit sur stdout ou
-    dans ``--out``. Le masquage est effectué en mémoire pour peupler les
-    compteurs du rapport (PRD F10); le texte masqué n'est pas écrit.
+    Deux formats (phase 48):
+      - ``markdown`` (défaut, historique): ``Vault.report()`` pour UN fichier,
+        clé requise (D11), registre persistant selon ``--registry``/``--scope``.
+      - ``json``: contrat public ``anonyfy.report.v1`` pour 1 à 50 fichiers,
+        mode observation, clé éphémère, aucun état persistant.
+
+    Le fichier d'entrée est seulement lu. Le masquage effectué en mémoire pour
+    peupler les compteurs du rapport (PRD F10) n'écrit ni texte masqué ni
+    registre pour le format JSON.
     """
+    if args.format == "json":
+        return _cmd_scan_json(args, out_stream, err_stream)
+    return _cmd_scan_markdown(args, out_stream, err_stream)
+
+
+def _cmd_scan_markdown(args: argparse.Namespace, out_stream: IO[str], err_stream: IO[str]) -> int:
+    """scan Markdown historique (mono-fichier, clé requise)."""
+    if len(args.fichier) != 1:
+        print(
+            "erreur: le format markdown accepte un seul fichier; "
+            "utilisez --format json pour un corpus",
+            file=err_stream,
+        )
+        return 1
     key = _resolve_key(args, err_stream)
     if key is None:
         return 1
-    text = _read_input(args.fichier, err_stream)
+    text = _read_input(args.fichier[0], err_stream)
     if text is None:
         return 1
     reg = _registry_path(args, args.scope)
@@ -170,6 +211,119 @@ def _cmd_scan(args: argparse.Namespace, out_stream: IO[str], err_stream: IO[str]
         out_stream.write(report)
         if not report.endswith("\n"):
             out_stream.write("\n")
+    return 0
+
+
+def _reject_json_persistent_options(args: argparse.Namespace, err_stream: IO[str]) -> bool:
+    """Refuse les options incompatibles avec un scan JSON sans état.
+
+    ``--registry``, ``--scope`` (explicite) et ``--audit`` impliqueraient un
+    état ou un journal persistants. Le mode observation n'en veut aucun: la
+    détection ne substitue rien et le rapport ne porte que des agrégats.
+
+    Retourne ``True`` si une option a été refusée (déjà signalée).
+    """
+    registry = getattr(args, "registry", None)
+    if registry:
+        print(
+            "refus: --registry est interdit avec --format json "
+            "(le scan observation ne crée aucun registre persistant)",
+            file=err_stream,
+        )
+        return True
+    if getattr(args, "scope", None) != "default":
+        print(
+            "refus: --scope est interdit avec --format json "
+            "(le scan observation ne persiste aucun scope)",
+            file=err_stream,
+        )
+        return True
+    if getattr(args, "audit", None):
+        print(
+            "refus: --audit est interdit avec --format json "
+            "(aucun journal de traces de source n'est écrit en observation)",
+            file=err_stream,
+        )
+        return True
+    if getattr(args, "key_file", None):
+        print(
+            "refus: --key-file est interdit avec --format json "
+            "(le scan observation utilise une clé éphémère non exportée)",
+            file=err_stream,
+        )
+        return True
+    if getattr(args, "key", None):
+        print(
+            "refus: --key est interdit avec --format json "
+            "(le scan observation utilise une clé éphémère non exportée)",
+            file=err_stream,
+        )
+        return True
+    return False
+
+
+def _cmd_scan_json(args: argparse.Namespace, out_stream: IO[str], err_stream: IO[str]) -> int:
+    """scan JSON: contrat public ``anonyfy.report.v1`` en mode observation.
+
+    Aucune clé n'est lue (ni ``ANONYFY_KEY``, ni ``--key-file``): la clé est
+    éphémère et sert uniquement à instancier le Vault, puisque l'observation ne
+    substitue rien. Le registre vit dans un répertoire temporaire supprimé en
+    fin d'exécution; aucun ``.db`` ne survit à la commande.
+    """
+    if _reject_json_persistent_options(args, err_stream):
+        return 1
+    paths = args.fichier
+    if len(paths) > MAX_DOCUMENTS:
+        print(
+            f"erreur: {len(paths)} fichiers fournis; le contrat v1 accepte au plus "
+            f"{MAX_DOCUMENTS} documents",
+            file=err_stream,
+        )
+        return 1
+
+    builder = ObservationReportBuilder(confidence_threshold=WEAK_CONFIDENCE_THRESHOLD)
+    with tempfile.TemporaryDirectory(prefix="anonyfy-observation-") as workdir:
+        vault = Vault(
+            key=secrets.token_bytes(16),
+            scope=_JSON_SCOPE,
+            registry_path=str(Path(workdir) / "registry.db"),
+        )
+        try:
+            for raw_path in paths:
+                path = Path(raw_path)
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    print(
+                        f"erreur: fichier non décodable en UTF-8: {path}",
+                        file=err_stream,
+                    )
+                    return 1
+                except OSError as exc:
+                    print(f"erreur: lecture du fichier d'entrée échouée: {exc}", file=err_stream)
+                    return 1
+                result = vault.mask(text, observe=True)
+                # Seuls la taille et les spans sont transmis: ni texte, ni chemin.
+                builder.add_document(character_count=len(text), spans=result.entities)
+        finally:
+            vault.close()
+
+    report = builder.build(
+        generated_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        producer_version=__version__,
+        gazetteer_version=gazetteer_version(),
+    )
+    payload = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+
+    out_path = getattr(args, "out", None)
+    if out_path:
+        try:
+            Path(out_path).write_text(payload, encoding="utf-8")
+        except OSError as exc:
+            print(f"erreur: écriture du rapport échouée: {exc}", file=err_stream)
+            return 1
+    else:
+        out_stream.write(payload)
     return 0
 
 
@@ -236,11 +390,21 @@ def build_parser() -> argparse.ArgumentParser:
         "scan",
         help="produit un rapport sans modifier le fichier d'entrée",
     )
-    sp_scan.add_argument("fichier", help="fichier à scanner")
+    sp_scan.add_argument(
+        "fichier",
+        nargs="+",
+        help="fichier(s) à scanner (1 à 50 en --format json)",
+    )
     sp_scan.add_argument("--scope", default="default", help="identifiant de scope")
     sp_scan.add_argument("--registry", help="chemin du registre SQLite")
     sp_scan.add_argument("--out", help="fichier de sortie du rapport (défaut: stdout)")
     sp_scan.add_argument("--audit", help="chemin du journal d'audit (optionnel)")
+    sp_scan.add_argument(
+        "--format",
+        choices=("markdown", "json"),
+        default="markdown",
+        help="format du rapport: markdown (défaut, mono-fichier) ou json (contrat v1)",
+    )
     _add_key_arguments(sp_scan)
     sp_scan.set_defaults(func=_cmd_scan)
 
