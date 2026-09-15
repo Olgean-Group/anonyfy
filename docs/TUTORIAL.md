@@ -260,7 +260,25 @@ ANONYFY_KEY=00000000000000000000000000000000 \
   uv run anonyfy scan fichier.txt --scope dossier-1234 --out rapport.txt
 ```
 
-`scan` produit un rapport; le fichier d'entrée n'est pas modifié.
+`scan` produit un rapport Markdown; le fichier d'entrée n'est pas modifié.
+
+### scan --format json — contrat public `anonyfy.report.v1` (corpus)
+
+```bash
+uv run anonyfy scan dossier/*.txt --format json --out rapport.json
+```
+
+`--format json` accepte 1 à 50 fichiers (50 000 000 caractères cumulés au
+plus) et produit un rapport d'agrégats conforme au schéma normatif
+`anonyfy.report.v1` (`anonyfy.schemas.load_report_schema()`): comptes par type
+d'entité, `rule_ids`, avertissements contrôlés, versions producteur et
+gazetteer. Aucune clé n'est requise : le mode observation utilise une clé
+éphémère et un registre temporaire supprimé en fin d'exécution. Le rapport ne
+contient aucun nom de fichier, aucun extrait, aucune valeur claire ni aucun
+substitut. En JSON, `--scope`, `--registry`, `--audit`, `--key` et `--key-file`
+sont refusés.
+
+### mask — masque et écrit dans --out
 
 ### mask — masque et écrit dans --out
 
