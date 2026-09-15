@@ -76,14 +76,50 @@ def _make_wheel(path: Path, members: dict[str, bytes]) -> Path:
 
 CLEAN_SDIST = {
     "anonyfy-0.1.0/src/anonyfy/__init__.py": b'__version__ = "0.1.0"\n',
+    "anonyfy-0.1.0/src/anonyfy/schemas/anonyfy.report.v1.schema.json": b'{"$id": "urn:anonyfy:report:v1"}\n',
     "anonyfy-0.1.0/LICENSE": b"Apache-2.0\n",
     "anonyfy-0.1.0/README.md": b"# anonyfy\n",
 }
 
 CLEAN_WHEEL = {
     "anonyfy/__init__.py": b'__version__ = "0.1.0"\n',
+    "anonyfy/schemas/anonyfy.report.v1.schema.json": b'{"$id": "urn:anonyfy:report:v1"}\n',
     "anonyfy-0.1.0.dist-info/METADATA": b"Metadata-Version: 2.1\n",
 }
+
+
+def test_clean_sdist_has_report_schema_present(tmp_path: Path) -> None:
+    """Garde-fou phase 48: la sdist propre contient le schéma normatif -> exit 0."""
+    sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", CLEAN_SDIST)
+    result = _run_script(sdist)
+    _assert_returncode(result, 0)
+
+
+def test_clean_wheel_has_report_schema_present(tmp_path: Path) -> None:
+    """Garde-fou phase 48: la wheel propre contient le schéma normatif -> exit 0."""
+    wheel = _make_wheel(tmp_path / "anonyfy-0.1.0-py3-none-any.whl", CLEAN_WHEEL)
+    result = _run_script(wheel)
+    _assert_returncode(result, 0)
+
+
+def test_wheel_missing_report_schema_returns_one(tmp_path: Path) -> None:
+    """Une wheel sans ``anonyfy/schemas/anonyfy.report.v1.schema.json`` -> exit 1.
+
+    Le contrat public est la raison d'être de la phase 48: un artefact qui ne
+    l'embarque pas ne peut pas être consommé par ``anonyfy-audit``.
+    """
+    members = {k: v for k, v in CLEAN_WHEEL.items() if "schemas/" not in k}
+    wheel = _make_wheel(tmp_path / "anonyfy-0.1.0-py3-none-any.whl", members)
+    result = _run_script(wheel)
+    _assert_returncode(result, 1)
+
+
+def test_sdist_missing_report_schema_returns_one(tmp_path: Path) -> None:
+    """Une sdist sans le schéma normatif -> exit 1."""
+    members = {k: v for k, v in CLEAN_SDIST.items() if "schemas/" not in k}
+    sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", members)
+    result = _run_script(sdist)
+    _assert_returncode(result, 1)
 
 
 def test_script_exists() -> None:

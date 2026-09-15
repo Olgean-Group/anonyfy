@@ -8,8 +8,11 @@ build/
 # Artefacts de pilotage Olgenius et de session (locaux, non versionnés)
 .olgenius/
 resume.md
-# Sauvegardes locales (règle globale, couvre src/anonyfy/*.bak)
+# Sauvegardes locales (règle globale, couvre src/anonyfy/*.bak). Le glob
+# `*.bak*` couvre aussi les sauvegardes à suffixe unique exigées par les plans
+# (ex. pyproject.toml.bak-contrat-v1).
 *.bak
+*.bak*
 # Coverage (artefacts pytest-cov, locaux)
 .coverage
 htmlcov/

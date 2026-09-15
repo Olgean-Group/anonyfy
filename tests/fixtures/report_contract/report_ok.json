@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "producer": {
+    "name": "anonyfy",
+    "version": "0.1.7"
+  },
+  "generated_at": "2026-09-15T10:00:00Z",
+  "observation": {
+    "mode": "observation",
+    "confidence_threshold": 0.8,
+    "document_count": 3,
+    "character_count": 15102,
+    "total_occurrence_count": 10,
+    "types": [
+      {
+        "entity_type": "NIR",
+        "occurrence_count": 4,
+        "document_count": 2,
+        "high_confidence_count": 4,
+        "low_confidence_count": 0,
+        "rule_ids": ["nir-mod97"]
+      },
+      {
+        "entity_type": "SIRET",
+        "occurrence_count": 3,
+        "document_count": 3,
+        "high_confidence_count": 3,
+        "low_confidence_count": 0,
+        "rule_ids": ["siret-luhn"]
+      },
+      {
+        "entity_type": "PATRONYME",
+        "occurrence_count": 3,
+        "document_count": 2,
+        "high_confidence_count": 2,
+        "low_confidence_count": 1,
+        "rule_ids": ["gazetteer-nom"]
+      }
+    ],
+    "warnings": [
+      {
+        "code": "LOW_CONFIDENCE_OCCURRENCES",
+        "count": 1,
+        "entity_type": "PATRONYME"
+      }
+    ]
+  },
+  "gazetteer_version": "e7adbcf0d3572f3ee97718b68a8a7f4965426b6704c0c604c70861a8f8e85adb"
+}
