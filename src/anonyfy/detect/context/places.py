@@ -59,6 +59,28 @@ _CP_COMMUNE_WINDOW = 15
 # Fenêtre entre la fin d'un déclencheur CP et le début du CP.
 _CP_TRIGGER_WINDOW = 10
 
+# Phase 50 — REV-MAJ-1: verbes d'adresse (indice COMMUNE, D42c) — SOURCE UNIQUE
+# (REV-MIN-4). ``engine._ADDRESS_VERBS`` les réexporte pour ne pas dupliquer la
+# liste; ``places`` doit la définir ici car ``engine`` importe ``places`` (pas
+# l'inverse) et le module ``triggers`` ne connaît pas la notion d'adresse.
+# Divergence justifiée : ``à `` nu reste un déclencheur CP (S4) mais PAS un
+# indice COMMUNE ; ``adresse : `` est un indice COMMUNE mais pas un déclencheur CP.
+ADDRESS_VERBS: tuple[str, ...] = (
+    "domicilié à ",
+    "demeurant à ",
+    "habite à ",
+    "résidant à ",
+    "adresse : ",
+    # Phase 45 — R5 (D45b/D45h) : formule « Fait à <commune> ». La forme
+    # insensible à la casse et contrainte au début de ligne est portée par
+    # ``_FAIT_A_RE`` (D45d); la chaîne exacte couvre la forme canonique.
+    "Fait à ",
+)
+
+# Fenêtre (caractères) entre la fin du verbe d'adresse et le début de la
+# commune : « immédiatement avant » (D42c) = au plus une espace blanche.
+ADDRESS_VERB_WINDOW: int = 1
+
 # Token: lettres (accentuées), apostrophes ' et ’, tirets internes. Les chiffres
 # et la ponctuation séparante ne sont pas des tokens (ex. le "12" et "75001" ne
 # font pas partie du nom de voie/commune).

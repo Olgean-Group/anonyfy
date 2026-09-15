@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import bisect
 
+from anonyfy.detect.context import places
 from anonyfy.types import EntityType, Span
 
 __all__ = ["DEFAULT_PRIORITY", "resolve_overlaps"]
@@ -55,6 +56,21 @@ def _is_captured_patronyme(span: Span) -> bool:
         span.type == EntityType.PATRONYME
         and span.rule_id in _CAPTURE_RULES
         and span.confidence >= _CAPTURE_MIN_CONFIDENCE
+    )
+
+
+def _is_apres_verbe_adresse(span: Span, text: str) -> bool:
+    """True si le span suit immédiatement un verbe d'adresse (D42c).
+
+    Phase 50 — REV-MAJ-1: le déclencheur patronyme ``demeurant`` (phase 12,
+    fenêtre 40) booste à tort un token d'adresse situé après lui
+    (« demeurant à Paris » -> ``Paris`` boosté PATRONYME 0.9) alors que le
+    token est une COMMUNE en contexte d'adresse. Le TITRE (« M. Paris ») reste
+    un déclencheur patronyme légitime : seul un verbe d'adresse complet
+    (``places.ADDRESS_VERBS``, source unique REV-MIN-4) neutralise le boost.
+    """
+    return places._trigger_before(
+        span.start, text, places.ADDRESS_VERBS, places.ADDRESS_VERB_WINDOW
     )
 
 
@@ -94,17 +110,51 @@ def resolve_overlaps(
     spans: list[Span],
     *,
     priority: dict[EntityType, int] | None = None,
+    text: str | None = None,
 ) -> list[Span]:
     """Résout les chevauchements: spécificité > longueur > priorité déclarée.
 
     Renvoie les spans non chevauchants, triés par position de début. Un span
     perdant est entièrement exclu (pas de tronquage: l'identifiant perdant n'est
     pas un préfixe valide du gagnant dans tous les cas).
+
+    ``text`` (optionnel) active la neutralisation REV-MAJ-1 : un PATRONYME boosté
+    par le déclencheur ``demeurant`` mais situé après un verbe d'adresse et
+    chevauchant une COMMUNE/VOIE est retiré, pour que la lecture d'adresse gagne
+    (F3-type). Sans ``text``, l'arbitrage est inchangé (appels hors moteur).
     """
     if not spans:
         return []
 
     prio = priority if priority is not None else DEFAULT_PRIORITY
+
+    # Phase 50 — REV-MAJ-1: « demeurant à Paris » émettait PATRONYME (boost du
+    # déclencheur ``demeurant``, phase 12) et l'étape S3 ci-dessous retirait la
+    # COMMUNE chevauchante : un token d'adresse ambigui (patronyme + commune)
+    # était typé PATRONYME, violant F3-type. Un PATRONYME immédiatement précédé
+    # d'un verbe d'adresse et chevauchant une COMMUNE/VOIE est le nom de
+    # l'adresse, pas une personne : on retire la lecture patronyme, la
+    # commune/voie reste (le clair est toujours masqué, invariant 1).
+    # Borné : sans verbe d'adresse (« M. Paris ») le boost patronyme est
+    # conservé ; sans COMMUNE/VOIE concurrente, le span n'est pas touché.
+    if text is not None:
+        lieux = [
+            s
+            for s in spans
+            if s.type in (EntityType.COMMUNE, EntityType.VOIE) and _is_apres_verbe_adresse(s, text)
+        ]
+        if lieux:
+            spans = [
+                s
+                for s in spans
+                if not (
+                    s.type == EntityType.PATRONYME
+                    and _is_apres_verbe_adresse(s, text)
+                    and any(_overlaps(s, lieu) for lieu in lieux)
+                )
+            ]
+            if not spans:
+                return []
 
     # Phase 39 — R4 (D39a/D39b): un token PRENOM+COMMUNE adjacent à un candidat
     # PATRONYME (ou PRENOM) est une PERSONNE, pas une commune : la lecture
