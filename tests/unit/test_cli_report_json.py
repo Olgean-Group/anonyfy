@@ -73,9 +73,7 @@ def test_scan_json_output_matches_normative_schema(tmp_path):
 
 
 def test_scan_json_accepts_exactly_fifty_documents(tmp_path):
-    files = [
-        _write(tmp_path / f"doc-{index:03d}.txt", f"SIRET {SIRET}\n") for index in range(50)
-    ]
+    files = [_write(tmp_path / f"doc-{index:03d}.txt", f"SIRET {SIRET}\n") for index in range(50)]
     output = tmp_path / "report.json"
 
     rc = main(["scan", *(str(path) for path in files), "--format", "json", "--out", str(output)])
@@ -159,6 +157,31 @@ def test_scan_json_rejects_key_or_registry_options(tmp_path):
     assert rc != 0
     assert not output.exists()
     assert "--registry" in err_stream.getvalue()
+
+
+def test_scan_json_rejects_audit_journal(tmp_path):
+    file1 = _write(tmp_path / "a.txt", f"SIRET {SIRET}\n")
+    output = tmp_path / "report.json"
+    err_stream = io.StringIO()
+
+    rc = main(
+        [
+            "scan",
+            str(file1),
+            "--format",
+            "json",
+            "--audit",
+            str(tmp_path / "audit.jsonl"),
+            "--out",
+            str(output),
+        ],
+        err=err_stream,
+    )
+
+    assert rc != 0
+    assert not output.exists()
+    assert not (tmp_path / "audit.jsonl").exists()
+    assert "--audit" in err_stream.getvalue()
 
 
 def test_scan_json_rejects_more_than_fifty_paths(tmp_path):
