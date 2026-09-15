@@ -245,6 +245,20 @@ def _reject_json_persistent_options(args: argparse.Namespace, err_stream: IO[str
             file=err_stream,
         )
         return True
+    if getattr(args, "key_file", None):
+        print(
+            "refus: --key-file est interdit avec --format json "
+            "(le scan observation utilise une clé éphémère non exportée)",
+            file=err_stream,
+        )
+        return True
+    if getattr(args, "key", None):
+        print(
+            "refus: --key est interdit avec --format json "
+            "(le scan observation utilise une clé éphémère non exportée)",
+            file=err_stream,
+        )
+        return True
     return False
 
 

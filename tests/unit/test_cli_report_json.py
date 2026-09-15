@@ -184,6 +184,33 @@ def test_scan_json_rejects_audit_journal(tmp_path):
     assert "--audit" in err_stream.getvalue()
 
 
+def test_scan_json_rejects_key_options(tmp_path):
+    file1 = _write(tmp_path / "a.txt", f"SIRET {SIRET}\n")
+    key_file = tmp_path / "key.txt"
+    key_file.write_text("00" * 16, encoding="utf-8")
+    key_file.chmod(0o600)
+    output = tmp_path / "report.json"
+    err_stream = io.StringIO()
+
+    rc = main(
+        [
+            "scan",
+            str(file1),
+            "--format",
+            "json",
+            "--key-file",
+            str(key_file),
+            "--out",
+            str(output),
+        ],
+        err=err_stream,
+    )
+
+    assert rc != 0
+    assert not output.exists()
+    assert "--key-file" in err_stream.getvalue()
+
+
 def test_scan_json_rejects_more_than_fifty_paths(tmp_path):
     files = [_write(tmp_path / f"doc-{index:03d}.txt", "RAS\n") for index in range(51)]
     output = tmp_path / "report.json"
