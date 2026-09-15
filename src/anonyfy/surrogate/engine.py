@@ -154,29 +154,14 @@ def _is_pure_patronyme(span: Span) -> bool:
 # permissive que s'il porte un indice d'adresse fort ; un type faible sans
 # indice enregistré n'est PAS émis (défaut SAFE, D42b).
 #
-# Verbes d'adresse (indice COMMUNE, D42c) — réconciliés avec
-# ``places._CP_TRIGGERS`` (single source of truth, D42f : ``domicilié à `` et
-# ``résidant à `` y ont été ajoutés). Divergence justifiée : ``à `` nu reste un
-# déclencheur CP (S4) mais PAS un indice COMMUNE ; ``adresse : `` est un indice
-# COMMUNE mais pas un déclencheur CP.
-_ADDRESS_VERBS: tuple[str, ...] = (
-    "domicilié à ",
-    "demeurant à ",
-    "habite à ",
-    "résidant à ",
-    "adresse : ",
-    # Phase 45 — R5 (D45b/D45h) : formule « Fait à <commune> » (participe passé
-    # capitalisé + « à » immédiatement avant la commune). COMMUNE-only : PAS
-    # ajouté à ``places._CP_TRIGGERS`` car « à » nu couvre déjà le CP dans
-    # « Fait à 16000 Angoulême » (indice (b)). La forme de match insensible à
-    # la casse et contrainte au début de ligne est portée par ``_FAIT_A_RE``
-    # (D45d) ; la chaîne exacte « Fait à » ci-dessous couvre la forme
-    # capitalisée canonique du formulaire.
-    "Fait à ",
-)
+# Phase 50 — REV-MAJ-1/REV-MIN-4: la liste des verbes d'adresse est désormais
+# définie UNE SEULE FOIS dans ``places`` (source unique, ré-exportée ici pour
+# compatibilité). Elle doit rester synchronisée avec ``places._CP_TRIGGERS``
+# (déclencheurs CP) : ``engine`` importe ``places``, jamais l'inverse.
+_ADDRESS_VERBS: tuple[str, ...] = places.ADDRESS_VERBS
 # Fenêtre (caractères) entre la fin du verbe d'adresse et le début de la
 # commune : « immédiatement avant » (D42c) = au plus une espace blanche.
-_ADDRESS_VERB_WINDOW: int = 1
+_ADDRESS_VERB_WINDOW: int = places.ADDRESS_VERB_WINDOW
 
 #: Phase 45 — R5 (D45d) : indice (c) « Fait à <commune> » — participe passé
 #: capitalisé en début de ligne + « à » immédiatement avant la commune. Forme
@@ -435,7 +420,7 @@ class Engine:
         # format_pattern par span (identifié par id; resolve_overlaps renvoie les
         # memes objets, donc id est stable à travers l'arbitrage).
         fp_map: dict[int, str | None] = {id(s): fp for s, fp in pairs}
-        resolved = resolve_overlaps(spans)
+        resolved = resolve_overlaps(spans, text=text)
 
         if observe:
             # Mode observation (phase 17): détection seule, pas de substitution,
@@ -901,7 +886,7 @@ class Engine:
         Utilisé par ``Vault`` pour la policy de fermeture (strict/permissive)
         et le mode observation.
         """
-        return resolve_overlaps(self._detect_all(text))
+        return resolve_overlaps(self._detect_all(text), text=text)
 
     def _detect_all(self, text: str) -> list[Span]:
         """Détecte tous les identifiants (FPE + non-FPE), sans empreinte de format.
