@@ -38,6 +38,10 @@ class UnmaskWithoutMaskViolation(InvariantViolation):
     """Invariant 4: un substitut non emis dans le scope a ete demasque."""
 
 
+class SameTypeViolation(InvariantViolation):
+    """F3-type: un substitut n'est pas du meme type que le clair (repli silencieux)."""
+
+
 def assert_no_clear_leak(clear_tokens: Sequence[str], masked: str) -> None:
     """Invariant 1: aucun token clair ne doit apparaitre dans le texte masque.
 
@@ -92,14 +96,51 @@ def assert_only_emitted_unmasked(substitute: str, emitted: Container[str]) -> No
         raise UnmaskWithoutMaskViolation(f"substitut non emis dans le scope: {substitute!r}")
 
 
+def assert_substitute_same_type(
+    span: object,
+    expected_type: object,
+) -> None:
+    """F3-type: le substitut d'un span est de meme type que le clair attendu.
+
+    Phase 52 (REV-MIN-1): formalisation de l'invariant declare au PRD
+    (« substitut de meme type »). Un span dont le type differe du type attendu,
+    ou dont la regle de masquage designe un autre type (``mask-<type>``), est
+    un repli silencieux: il leve ``SameTypeViolation``.
+
+    Args:
+        span: objet portant ``type`` et ``rule_id`` (``anonyfy.types.Span``).
+        expected_type: type attendu pour ce token.
+
+    Les regles de detection (avant masquage, ex. ``gazetteer-commune``) sont
+    acceptees: seul le type est alors verifie. Une regle ``mask-*`` doit
+    designer le type declare.
+    """
+    declared = getattr(span, "type", None)
+    rule_id = getattr(span, "rule_id", "")
+    if declared != expected_type:
+        raise SameTypeViolation(
+            f"substitut de type {getattr(declared, 'value', declared)!r} "
+            f"pour un clair attendu {getattr(expected_type, 'value', expected_type)!r}"
+        )
+    if isinstance(rule_id, str) and rule_id.startswith("mask-"):
+        expected_rule = f"mask-{getattr(declared, 'value', declared).lower()}"
+        if rule_id != expected_rule:
+            raise SameTypeViolation(
+                f"regle de masquage {rule_id!r} incoherente avec le type declare "
+                f"({expected_rule!r} attendu)"
+            )
+
+
 __all__ = [
     "ClearBoundaryViolation",
     "InjectivityViolation",
     "InvariantViolation",
+    "SameTypeViolation",
     "ScopedDeterminismViolation",
     "UnmaskWithoutMaskViolation",
     "assert_injectivity",
     "assert_no_clear_leak",
     "assert_only_emitted_unmasked",
     "assert_scoped_determinism",
+    "assert_substitute_same_type",
 ]

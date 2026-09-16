@@ -42,7 +42,14 @@ v = Vault(key=..., scope="dossier-1234")
 masked = v.mask(texte)              # -> MaskedText(.text, .entities)
 clair  = v.unmask(reponse_du_modele)
 v.report()                          # journal exploitable par un DPO
+v.flush()                           # optionnel : commit le registre avant publication
+v.close()                           # commit + fermeture (ou contexte `with`)
 ```
+
+Le registre est durable « au batch près » (commits par lots). Un opérateur qui
+publie un texte masqué juste après `mask()` appelle `flush()` (ou `close()`)
+pour que les réservations soient sur disque avant la publication ; les
+réservations restent idempotentes.
 
 ```
 anonyfy scan fichier.txt                          # mode observation : détecte, ne modifie rien

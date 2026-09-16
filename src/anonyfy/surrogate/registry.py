@@ -290,6 +290,10 @@ class ScopeRegistry:
         Phase 27 OBJ-REC-103: à l'ouverture, si un registre existant a été créé
         avec une version antérieure du gazetteer, les indices décalés cassent
         la réversibilité -> rejet. Premier ouverture: persiste l'empreinte courante.
+
+        Phase 52 (REV-MIN-8): ce contrôle ne recharge PAS les entrées en
+        mémoire (``_load_into_memory`` le fait une seule fois juste après) —
+        l'ancien double parcours ``SELECT`` était un coût d'ouverture inutile.
         """
         from anonyfy.detect.gazetteers.loader import check_gazetteer_version, gazetteer_version
 
@@ -301,11 +305,6 @@ class ScopeRegistry:
             return
         stored = row[0]
         check_gazetteer_version(stored)
-        for surrogate, entity_type, clear_hmac in self._conn.execute(
-            "SELECT surrogate, entity_type, clear_hmac FROM entries"
-        ):
-            self._hmac_to_surrogate[(entity_type, clear_hmac)] = surrogate
-            self._used_surrogates.add(surrogate)
 
     # --- Réservation --------------------------------------------------------
 
