@@ -29,7 +29,7 @@ from anonyfy.resolve.aho_corasick import AhoCorasick
 from anonyfy.surrogate.case_pattern import apply_case
 from anonyfy.surrogate.engine import Engine
 from anonyfy.surrogate.registry import ScopeRegistry
-from anonyfy.types import EntityType, MaskedText, UnresolvedSpanError
+from anonyfy.types import EntityType, MaskedText, Span, UnresolvedSpanError
 
 __all__ = ["UnresolvedSpanError", "Vault"]
 
@@ -114,14 +114,23 @@ class Vault:
             return result
 
         # Non-observe: vérifier la policy sur les spans détectés avant substitution.
-        resolved = self._engine.detect(text)
-        weak = [s for s in resolved if s.confidence < WEAK_CONFIDENCE_THRESHOLD]
-        if self._policy == "strict" and weak:
-            types = ", ".join(sorted({s.type.value for s in weak}))
-            raise UnresolvedSpanError(
-                f"span(s) de confiance faible non confirmé(s) par contexte en "
-                f"policy strict: {types} (confidence < {WEAK_CONFIDENCE_THRESHOLD})"
-            )
+        #
+        # Phase 57 — OBJ-009: la détection préalable ne sert qu'à lever sur span
+        # faible (``policy="strict"``) ou à journaliser les métadonnées
+        # ``weak_spans`` (audit). Sur le chemin par défaut (permissive, sans
+        # audit), elle était inutile et doublait le coût de la détection
+        # (~36 % du temps de ``mask()`` mesuré). On ne la déclenche donc que
+        # lorsqu'un de ces deux besoins existe.
+        weak: list[Span] = []
+        if self._policy == "strict" or self._audit is not None:
+            resolved = self._engine.detect(text)
+            weak = [s for s in resolved if s.confidence < WEAK_CONFIDENCE_THRESHOLD]
+            if self._policy == "strict" and weak:
+                types = ", ".join(sorted({s.type.value for s in weak}))
+                raise UnresolvedSpanError(
+                    f"span(s) de confiance faible non confirmé(s) par contexte en "
+                    f"policy strict: {types} (confidence < {WEAK_CONFIDENCE_THRESHOLD})"
+                )
 
         # Phase 35 (D35h): en policy strict, un span non masquable (substitut
         # final == clair après sondage borné) lève UnresolvedSpanError via le
