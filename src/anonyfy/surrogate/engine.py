@@ -357,6 +357,23 @@ def _valid_cps_for_dept(cp_map: dict[str, str], dept: str) -> list[str]:
     return _CP_BY_DEPT_CACHE.get(dept, [])
 
 
+def _depts_avec_cp() -> list[str]:
+    """Départements pourvus d'au moins un CP valide, triés (phase 51).
+
+    Source du tirage ``_random_dept`` : un département sans CP rendrait le
+    substitut impossible et laisserait le clair en place (fuite, invariant 1).
+    Lit le cache du module (``_valid_cps_for_dept``), avec un CP arbitraire
+    pour amorcer le cache si nécessaire.
+    """
+    from anonyfy.detect.gazetteers.loader import load_codes_postaux
+
+    cp_map = load_codes_postaux()
+    if _CP_BY_DEPT_CACHE is None:
+        _valid_cps_for_dept(cp_map, "01")
+    assert _CP_BY_DEPT_CACHE is not None
+    return sorted(dept for dept, cps in _CP_BY_DEPT_CACHE.items() if cps)
+
+
 class Engine:
     """Moteur de masquage (phase 08 + 13).
 
@@ -818,15 +835,36 @@ class Engine:
         return candidates[idx]
 
     def _random_dept(self, cp_clear: str) -> str:
-        """Département aléatoire (HMAC-déterministe), != dept du CP clair."""
+        """Département HMAC-déterministe pour un CP trigger-only (D46f).
+
+        Phase 51 — REV-MIN-2 (promu sûreté) : le département est tiré parmi
+        les départements qui ont RÉELLEMENT des CP valides dans la base
+        embarquée. L'ancien tirage ``% 96 + 1`` pouvait rendre 96 (hors
+        métropole) ou 20 (Corse, préfixe 2 chiffres absent de la base) :
+        ``_valid_cps_for_dept`` était vide et le CP clair restait en place
+        (fuite, invariant 1, ~1 % des cas). Le domaine est donc la liste
+        triée des départements pourvus (métropole 01-95, Corse 2A/2B, DOM
+        et territoires), et le rebouclage exclut le département d'origine.
+        """
         original_dept = cp_clear[:2] if len(cp_clear) >= 2 else ""
+        # 2A/2B : le préfixe du CP est « 20 » (``_cp_prefix``), pas « 2A ».
+        if original_dept == "20" and cp_clear[:3] in ("200", "201", "202"):
+            original_dept = "20"
         msg = self._scope.encode("utf-8") + b"\x00code_postal_dept\x00" + cp_clear.encode("utf-8")
         digest = hmac.new(self._key, msg, hashlib.sha256).digest()
-        dept_num = int.from_bytes(digest[:2], "big") % 96 + 1  # 01-96
-        dept = f"{dept_num:02d}"
-        if dept == original_dept:
-            dept = f"{(dept_num % 95) + 1:02d}"
-        return dept
+        depts = _depts_avec_cp()
+        if not depts:
+            # Base vide (ne devrait pas arriver, gazetteer figé): repli sûr sur
+            # le domaine métropolitain historique, borné à 01-95.
+            dept_num = int.from_bytes(digest[:2], "big") % 95 + 1
+            return f"{dept_num:02d}"
+        start = int.from_bytes(digest[:2], "big") % len(depts)
+        n = len(depts)
+        for k in range(n):
+            dept = depts[(start + k) % n]
+            if _cp_prefix(dept) != original_dept:
+                return dept
+        return depts[start]
 
     def decrypt_surrogate(self, etype: EntityType, surrogate: str) -> str | None:
         """Déchiffre un substitut selon son type (pour Vault.unmask)."""
