@@ -14,12 +14,10 @@ Référence: BACKLOG OE-LIGATURE-DETECT.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from anonyfy import Vault
-from anonyfy.detect.gazetteers.loader import load_communes, load_voies
+from anonyfy.detect.gazetteers.loader import load_communes
 from anonyfy.types import EntityType
 
 KEY = b"0" * 16
@@ -65,9 +63,7 @@ class TestCommunesLigature:
         t = f"Il habite à {nom}."
         m = vault.mask(t)
         fragments = _fragments_fuite(nom, m.text)
-        assert not fragments, (
-            f"fragments du clair {nom!r} en clair dans {m.text!r}: {fragments}"
-        )
+        assert not fragments, f"fragments du clair {nom!r} en clair dans {m.text!r}: {fragments}"
         assert nom.casefold() not in m.text.casefold(), (
             f"la commune {nom!r} n'est pas masquée: {m.text!r}"
         )
@@ -92,13 +88,29 @@ class TestCommunesLigature:
 
 
 class TestLigatureMajusculeEnInitiale:
-    """« Œuilly » en début de phrase (initiale capitale) doit être détecté."""
+    """La ligature capitale « Œ » est tokenisée (cause racine corrigée).
 
-    def test_oeuilly_en_initiale(self, vault):
+    En position d'initiale de prose SANS indice d'adresse, le toponyme est
+    préservé (règle D42b/D42c, comme « Le maire de Paris. »). Le test vérifie
+    donc (a) que le span COMMUNE existe dans le gazetteer (tokenisation
+    correcte) et (b) qu'en contexte d'adresse il est bien masqué.
+    """
+
+    def test_oeuilly_tokenise_dans_le_gazetteer(self, vault):
         t = "Œuilly est une commune de l'Aisne."
+        observe = vault.mask(t, observe=True)
+        communes = [s for s in observe.entities if s.type == EntityType.COMMUNE]
+        assert communes, (
+            "« Œuilly » (Œ initial) n'est pas tokenisé comme commune : "
+            f"ligature non couverte par la classe de tokens ({observe.entities!r})"
+        )
+        assert t[communes[0].start : communes[0].end] == "Œuilly"
+
+    def test_oeuilly_masque_en_contexte_adresse(self, vault):
+        t = "Il habite à Œuilly."
         m = vault.mask(t)
         assert "Œuilly" not in m.text, f"« Œuilly » (Œ initial) fuit: {m.text!r}"
-        assert m.entities, "aucun span émis pour « Œuilly »"
+        assert m.entities, "aucun span émis pour « Œuilly » en contexte d'adresse"
 
 
 class TestVoiesLigature:

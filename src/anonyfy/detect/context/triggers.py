@@ -186,7 +186,14 @@ _WINDOW = 40
 
 # Token candidat: mot capitalisé, lettres accentuées, apostrophes/tirets internes
 # (Jean-Marc, O'Brien). Frontières par exclusion des caractères non lettres.
-_TOKEN_RE = re.compile(r"[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]*")
+#
+# Phase 55 — OE-LIGATURE-DETECT: « Œ » (U+0152) est hors de la plage `À-Ý`
+# (U+00C0-U+00DD) et « œ » (U+0153) hors de `À-ÿ` (U+00C0-U+00FF) : sans les
+# ligatures explicites, « Œuilly » était tronqué en « uilly » et le token ne
+# matchait plus le gazetteer. Idem « æ »/« Æ » (dans `À-ÿ`, mais inclus par
+# cohérence avec places._TOKEN_RE).
+_LIGATURES = "\u0152\u0153\u00c6\u00e6"  # Œ œ Æ æ
+_TOKEN_RE = re.compile(rf"[A-ZÀ-Ý{_LIGATURES}][A-Za-zÀ-ÿ{_LIGATURES}'’-]*")
 
 #: Nombre maximum de tokens d'un patronyme composé (phase 35, D35e). Les
 #: entrées multi-mots du gazetteer noms (220 200) vont jusqu'à ~8 mots; borné à

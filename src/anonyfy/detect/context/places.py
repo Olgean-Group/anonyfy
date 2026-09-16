@@ -81,10 +81,17 @@ ADDRESS_VERBS: tuple[str, ...] = (
 # commune : « immédiatement avant » (D42c) = au plus une espace blanche.
 ADDRESS_VERB_WINDOW: int = 1
 
-# Token: lettres (accentuées), apostrophes ' et ’, tirets internes. Les chiffres
-# et la ponctuation séparante ne sont pas des tokens (ex. le "12" et "75001" ne
-# font pas partie du nom de voie/commune).
-_TOKEN_RE = re.compile(r"[A-Za-zÀ-ÿ'’-]+")
+# Token: lettres (accentuées, ligatures œ/Œ et æ/Æ incluses), apostrophes ' et ’,
+# tirets internes. Les chiffres et la ponctuation séparante ne sont pas des
+# tokens (ex. le "12" et "75001" ne font pas partie du nom de voie/commune).
+#
+# Phase 55 — OE-LIGATURE-DETECT: les ligatures « œ »/« Œ » (U+0153/U+0152) et
+# « æ »/« Æ » (U+00E6/U+00C6) sont HORS de la plage `À-ÿ` (U+00C0-U+00FF) pour
+# œ/Œ. Sans elles, un token contenant une ligature était tronqué au « œ » et ne
+# matchait plus le gazetteer : 73 des 105 communes à ligature n'étaient jamais
+# masquées (fuite, invariant 1) et 9 étaient masquées partiellement.
+_LIGATURES = "\u0152\u0153\u00c6\u00e6"  # Œ œ Æ æ
+_TOKEN_RE = re.compile(rf"[A-Za-zÀ-ÿ{_LIGATURES}'’-]+")
 
 # Nombre maximum de tokens d'une phrase candidate (voies longues, communes
 # composées). Borné pour éviter l'explosion combinatoire.
