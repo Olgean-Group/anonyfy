@@ -88,7 +88,11 @@ class TestCanarisParametriques:
     def test_version_module_still_pins_expected_version(self):
         """test_version reste le point d'ancrage explicite du bump."""
         text = (REPO / "tests" / "unit" / "test_version.py").read_text(encoding="utf-8")
-        assert "0.1.7" in text, "test_version doit indiquer la version attendue du bump"
+        with PYPROJECT.open("rb") as fh:
+            current = tomllib.load(fh)["project"]["version"]
+        assert current in text, (
+            f"test_version doit indiquer la version courante ({current}) du bump"
+        )
 
 
 class TestFF3Borne:
