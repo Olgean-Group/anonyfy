@@ -288,6 +288,17 @@ class Vault:
             mask_calls=self._mask_calls,
         )
 
+    def flush(self) -> None:
+        """Commit le batch de réservations en cours (durabilité immédiate).
+
+        Phase 52 (REV-MIN-7): la durabilité du registre est « au batch près »
+        (``ScopeRegistry`` commite par lots). Un opérateur qui publie un texte
+        masqué juste après ``mask()`` doit appeler ``flush()`` (ou ``close()``)
+        pour que les réservations soient sur disque avant la publication. Les
+        réservations restent idempotentes : re-réserver reconstruit le même état.
+        """
+        self._registry.flush()
+
     def close(self) -> None:
         """Ferme le registre (commit + fermeture SQLite)."""
         self._registry.close()
