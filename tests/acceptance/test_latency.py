@@ -11,6 +11,7 @@ Référence: PRD §10 critère 7 + §6 latence, PLAN.md phase 19.
 
 from __future__ import annotations
 
+import statistics
 import time
 
 import pytest
@@ -74,19 +75,24 @@ def test_mask_10k_dense_under_50ms(vault):
     compact riche en SIRET et patronymes. Cible PRD §6 stricte 50 ms
     inatteignable: le FPE FF3-1 (lib ff3 + pycryptodome) chiffre ~250 SIRET
     uniques (~30 ms non réductibles sans changer d'algorithme, hors périmètre).
-    Arbitrage S5: seuil assoupli à 100 ms (marge CI réaliste sur latence
-    steady-state ~62-66 ms best, variable jusqu'à ~100 ms selon la charge).
-    Latence avant optimisations: 249 ms.
+    Arbitrage S5: seuil assoupli à 100 ms.
+
+    REV-MIN-9 (OBJ-107): la mesure est la MÉDIANE des runs, pas le meilleur cas.
+    Le meilleur cas masquait la variance machine et rendait le test flaky en CI
+    (mesures observées 62-100 ms selon la charge) ; la médiane est robuste aux
+    pics ponctuels tout en échouant sur une vraie régression.
 
     Non tautologique: une régression du cache FF3Cipher (phase 32), de
     l'interval tree d'arbitrage, ou du préfiltre first_words le ferait échouer.
     """
     vault.mask(_DENSE_TEXT)  # échauffement (cache + chargement paresseux)
-    best = float("inf")
+    samples: list[float] = []
     for _ in range(_RUNS):
         start = time.perf_counter()
         vault.mask(_DENSE_TEXT)
-        best = min(best, (time.perf_counter() - start) * 1000.0)
-    assert best < _DENSE_TARGET_MS, (
-        f"latence {best:.2f} ms >= cible assouplie {_DENSE_TARGET_MS} ms"
+        samples.append((time.perf_counter() - start) * 1000.0)
+    median = statistics.median(samples)
+    assert median < _DENSE_TARGET_MS, (
+        f"latence médiane {median:.2f} ms >= cible assouplie {_DENSE_TARGET_MS} ms "
+        f"(échantillons: {[round(s, 1) for s in samples]})"
     )
