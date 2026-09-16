@@ -14,6 +14,7 @@ La Poste embarquée), pas seulement conforme au format.
 """
 
 import re
+import tempfile
 
 import pytest
 
@@ -181,3 +182,53 @@ class TestCasLimites:
         t = "16000 Angoulême et 75001 Paris"
         m = vault.mask(t)
         assert vault.unmask(m.text) == t
+
+
+class TestFuiteCPTriggerOnly:
+    """Phase 51 — REV-MIN-2 (promu sûreté) : un CP trigger-only ne doit JAMAIS
+    rester en clair, quelle que soit la valeur du département HMAC.
+
+    Le défaut : ``_random_dept`` peut rendre 96 (hors métropole) ou 20 (Corse
+    sans CP à 2 chiffres dans la base) ; ces départements n'ont aucun CP valide
+    dans la base La Poste, ``_valid_cps_for_dept`` est vide, et le CP clair
+    restait en place (fuite, invariant 1). Reproduction : ces quatre CP clairs
+    produisent exactement ces départements avec la clé nulle de test.
+    """
+
+    @pytest.mark.parametrize(
+        "clear_cp,dept_hmac",
+        [("10164", "20"), ("10177", "20"), ("10235", "96"), ("10380", "96")],
+    )
+    def test_cp_trigger_only_jamais_en_clair(self, vault, clear_cp, dept_hmac):
+        t = f"Il habite à {clear_cp}."
+        m = vault.mask(t)
+        assert clear_cp not in m.text, (
+            f"fuite invariant 1 : le CP {clear_cp!r} (dept HMAC {dept_hmac}) "
+            f"reste en clair dans {m.text!r}"
+        )
+        cp_span = [e for e in m.entities if e.type == EntityType.CODE_POSTAL]
+        assert len(cp_span) == 1, (
+            f"aucun substitut CODE_POSTAL émis pour {clear_cp!r} (dept {dept_hmac})"
+        )
+        assert vault.unmask(m.text) == t, f"round-trip échoué pour {clear_cp!r}"
+
+    def test_dept_hmac_toujours_dans_les_depts_a_cp(self):
+        """``_random_dept`` ne doit jamais rendre un département dépourvu de CP
+        dans la base (source de la fuite), sur un large échantillon."""
+        from anonyfy import Vault
+        from anonyfy.detect.gazetteers.loader import load_codes_postaux
+        from anonyfy.surrogate.engine import _valid_cps_for_dept
+
+        cp_map = load_codes_postaux()
+        tmp_dir = tempfile.mkdtemp()
+        v = Vault(key=_KEY, scope="s", registry_path=f"{tmp_dir}/r.db")
+        try:
+            engine = v._engine  # noqa: SLF001 - test d'acceptation du moteur
+            for n in range(10000, 96000, 997):
+                cp = f"{n:05d}"
+                dept = engine._random_dept(cp)  # noqa: SLF001
+                assert _valid_cps_for_dept(cp_map, dept), (
+                    f"_random_dept({cp!r}) -> dept {dept!r} sans CP (fuite possible)"
+                )
+        finally:
+            v.close()
