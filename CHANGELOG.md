@@ -1,3 +1,26 @@
+## 0.1.10 (2026-09-15)
+
+Correctif de performance : `Vault.mask` détectait les identifiants deux fois sur
+le chemin par défaut (permissive sans journal d'audit). Aucun changement d'API
+ni de comportement observable.
+
+### Détection unique (OBJ-009, phase 57)
+
+- **Avant** : `Vault.mask` appelait `Engine.detect(text)` pour le contrôle de
+  policy PUIS `Engine.mask(text)`, qui re-détecte. La détection était parcourue
+  deux fois ; sur un texte dense, elle représentait ~36 % du temps de `mask()`
+  (37,6 ms de détection pour 104,0 ms de masquage mesurés).
+- **Après** : la détection préalable n'est déclenchée que lorsqu'elle est
+  consommée — `policy="strict"` (lever sur span faible) ou journal d'audit
+  (métadonnées `weak_spans`). Sur le chemin par défaut, elle est supprimée.
+- **Mesure** : `mask()` sur texte dense passe de **104,0 ms à 48,1 ms**
+  (médiane, -54 %). Le test de latence dense (seuil 100 ms) dispose désormais
+  d'une large marge, ce qui réduit aussi le risque de flakiness en CI.
+- **Comportement préservé** : `policy="strict"` lève toujours
+  `UnresolvedSpanError` sur un span faible ; le journal d'audit contient
+  toujours `weak_spans` (mêmes métadonnées, aucun clair) ; `observe=True` était
+  déjà à détection unique.
+
 ## 0.1.9 (2026-09-15)
 
 Correctif de sûreté : les communes dont le nom contient la ligature « œ » ou
