@@ -1,3 +1,65 @@
+## 0.1.8 (2026-09-15)
+
+Correctif de sûreté et clôture des dettes de la revue de code S8 (jalon 0.1.5).
+Aucun changement d'API publique incompatible : une méthode `flush()` est ajoutée
+sur `Vault`, les canaris de version deviennent paramétriques, et `ff3` porte une
+borne supérieure. Le typage des adresses est corrigé.
+
+### Fuite CP trigger-only (REV-MIN-2, promu sûreté)
+
+- **Avant** : pour un code postal sans commune couplée (chemin « trigger-only »),
+  le département du substitut était tiré uniformément dans 01-96. Les
+  départements 96 (inexistant) et 20 (Corse à préfixe 2 chiffres, absent de la
+  base La Poste) n'ont aucun CP valide : le substitut restait indéfini et **le
+  code postal clair restait en clair** (fuite, invariant 1), dans environ 1 %
+  des cas (886 cas sur 86 000 mesurés).
+- **Après** : le département est tiré parmi ceux qui ont réellement des CP dans
+  la base embarquée (métropole 01-95, Corse 2A/2B, DOM et territoires), avec
+  rebouclage déterministe excluant le département d'origine. Mesure : 0 fuite
+  sur 2 000 CP trigger-only échantillonnés ; round-trip préservé.
+
+### Typage COMMUNE sur verbe d'adresse (REV-MAJ-1)
+
+- **Avant** : « demeurant à Paris » émettait un PATRONYME (le déclencheur
+  `demeurant` boostait le token suivant), violant F3-type « substitut de même
+  type » ; la COMMUNE chevauchante était retirée par l'arbitrage.
+- **Après** : un PATRONYME immédiatement précédé d'un verbe d'adresse
+  (`domicilié à`, `demeurant à`, `habite à`, `résidant à`, `adresse :`,
+  `Fait à`) et chevauchant une COMMUNE/VOIE est neutralisé : l'adresse gagne le
+  typage. Un titre (« M. Paris ») reste PATRONYME. La liste des verbes d'adresse
+  devient une source unique (`places.ADDRESS_VERBS`), supprimant la duplication
+  à l'origine du défaut.
+
+### Invariants et registre
+
+- **F3-type formalisé** (REV-MIN-1) : `assert_substitute_same_type` et
+  `SameTypeViolation` rejoignent `invariants.py` ; un repli de type silencieux
+  est détectable partout.
+- **`Vault.flush()` public** (REV-MIN-7) : commit du batch de réservations en
+  cours avant publication d'un masqué. La durabilité reste « au batch près ».
+- **Chargement registre unique** (REV-MIN-8) : le contrôle d'empreinte
+  gazetteer ne recharge plus les entrées (double parcours supprimé).
+
+### Dépendances et tests
+
+- **`ff3>=1.0.3,<2`** (REV-MIN-6) : borne supérieure pour protéger la
+  rétro-compatibilité des registres persistés (invariant 2) ; un snapshot de
+  substituts FPE fige le comportement attendu.
+- **Canaris paramétriques** (REV-MIN-5, OBJ-108) : `test_smoke` et
+  `test_package` lisent `pyproject.toml` au lieu de coder la version en dur.
+- **Latence dense robuste** (REV-MIN-9, OBJ-107) : seuil mesuré sur la médiane
+  des runs, pour ne plus dépendre du meilleur cas.
+- **Point fixe CP verrouillé** (REV-MIN-3, résidu OBJ-002) : cas réel
+  « 68220 Abergement-Clémenciat » couvert par un test.
+
+### Limitations résiduelles connues
+
+- Un code postal intercalaire après un verbe d'adresse (« demeurant à 75001
+  Paris ») peut rester typé PATRONYME (OBJ-R60), sans fuite : le clair est
+  masqué, seul le type est imparfait.
+- L'indicatif « demeure à » (non participial) n'est pas un verbe d'adresse
+  reconnu (OBJ-R61) ; « Paris » y reste typé PATRONYME, sans fuite.
+
 ## 0.1.7 (2026-09-15)
 
 Contrat public de rapport d'observation `anonyfy.report.v1` (phase 48) : le
