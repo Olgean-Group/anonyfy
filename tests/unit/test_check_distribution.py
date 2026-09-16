@@ -213,3 +213,25 @@ def test_no_arguments_reports_usage() -> None:
     assert result.stderr.strip() or result.stdout.strip(), (
         "aucun message affiché pour l'absence d'argument"
     )
+
+
+def test_wheel_with_private_renderer_content_returns_one(tmp_path: Path) -> None:
+    """Garde-fou plan 01 : aucun contenu du renderer privé dans le public.
+
+    Le plan exige que ni ``anonyfy_audit``, ni template, ni branding ne
+    franchissent la frontière public/privé.
+    """
+    for motif in ("anonyfy_audit/cli.py", "templates/report.html.j2", "branding/logo.svg"):
+        members = dict(CLEAN_WHEEL)
+        members[f"anonyfy/{motif}"] = b"private"
+        wheel = _make_wheel(tmp_path / "anonyfy-0.1.0-py3-none-any.whl", members)
+        result = _run_script(wheel)
+        _assert_returncode(result, 1)
+
+
+def test_sdist_with_private_template_returns_one(tmp_path: Path) -> None:
+    members = dict(CLEAN_SDIST)
+    members["anonyfy-0.1.0/src/anonyfy_audit/templates/report.html.j2"] = b"private"
+    sdist = _make_sdist(tmp_path / "anonyfy-0.1.0.tar.gz", members)
+    result = _run_script(sdist)
+    _assert_returncode(result, 1)
