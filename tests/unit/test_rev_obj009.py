@@ -62,7 +62,9 @@ def mask_calls(monkeypatch):
 class TestSimpleDetectionCheminDefaut:
     """Permissive sans audit : une seule détection (celle du masquage)."""
 
-    def test_mask_permissive_sans_audit_ne_detecte_pas_deux_fois(self, tmp_path, detect_calls, mask_calls):
+    def test_mask_permissive_sans_audit_ne_detecte_pas_deux_fois(
+        self, tmp_path, detect_calls, mask_calls
+    ):
         v = Vault(key=KEY, scope="s", registry_path=str(tmp_path / "r.db"))
         try:
             v.mask("SIRET 73282932000033 et M. Jean Dupont demeure à Paris.")
@@ -78,9 +80,7 @@ class TestSimpleDetectionCheminDefaut:
         v = Vault(key=KEY, scope="s", registry_path=str(tmp_path / "r.db"))
         try:
             v.mask("SIRET 73282932000033", observe=True)
-            assert detect_calls["n"] == 0, (
-                "observe utilise Engine.mask(observe=True), pas detect()"
-            )
+            assert detect_calls["n"] == 0, "observe utilise Engine.mask(observe=True), pas detect()"
         finally:
             v.close()
 
@@ -148,8 +148,6 @@ class TestDetectionConserveeQuandNecessaire:
         )
         try:
             v.mask("Je vais à Paris.")
-            assert detect_calls["n"] >= 1, (
-                "avec audit, detect() doit fournir les weak_spans"
-            )
+            assert detect_calls["n"] >= 1, "avec audit, detect() doit fournir les weak_spans"
         finally:
             v.close()
