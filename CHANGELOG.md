@@ -1,3 +1,23 @@
+## 0.1.9 (2026-09-15)
+
+Correctif de sûreté : les communes dont le nom contient la ligature « œ » ou
+« Œ » n'étaient pas tokenisées, donc jamais masquées. Aucun changement d'API.
+
+### Fuite des communes à ligature œ (phase 55)
+
+- **Avant** : la classe de tokens du détecteur couvrait `A-Za-zÀ-ÿ`, soit
+  U+0041–U+00FF. La ligature « œ » (U+0153) et « Œ » (U+0152) sont au-dessus :
+  le token était tronqué au « œ » et ne correspondait plus au gazetteer. Sur les
+  **105 communes** contenant « œ », **73 restaient entièrement en clair** et
+  **9 étaient masquées partiellement** (fragments du nom en clair, ex.
+  `Plœuc-L'Hermitage` → `DOLZ DEL CASTELLARœuc-L'Hermitage`).
+- **Après** : les ligatures `œ`/`Œ`/`æ`/`Æ` sont incluses dans les classes de
+  tokens de `places.py` (communes, voies) et `triggers.py` (prénoms,
+  patronymes). Mesure : **0 fragment en clair sur les 105 communes et les
+  4 voies** à ligature ; round-trip préservé.
+- Deux tests verrouillent la cause : la couverture directe des classes de
+  tokens et un balayage complet du gazetteer.
+
 ## 0.1.8 (2026-09-15)
 
 Correctif de sûreté et clôture des dettes de la revue de code S8 (jalon 0.1.5).
