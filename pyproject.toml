@@ -21,7 +21,10 @@ classifiers = [
     "Topic :: Security :: Cryptography",
 ]
 dependencies = [
-    "ff3>=1.0.3",
+    # Borne supérieure <2 (REV-MIN-6): un majeur 2.x peut casser la
+    # rétro-compatibilité des registres persistés (invariant 2, déterminisme
+    # scopé des substituts). Le bump majeur exigera une revue explicite.
+    "ff3>=1.0.3,<2",
 ]
 
 [project.scripts]
