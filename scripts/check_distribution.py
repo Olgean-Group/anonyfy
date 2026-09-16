@@ -54,6 +54,13 @@ FORBIDDEN: tuple[str, ...] = (
     "__pycache__/",
     "*.pyc",
     "raw/",
+    # Frontière public/privé (plan 01, phase 48) : aucun contenu du renderer
+    # privé ``anonyfy-audit`` (code, templates, branding, recommandations) ne
+    # doit franchir la distribution publique. Le contrat public est un schéma
+    # d'interopérabilité, pas le produit de présentation.
+    "anonyfy_audit/",
+    "templates/",
+    "branding/",
 )
 
 # Membres obligatoires dans la distribution (phase 48). Le schéma normatif
