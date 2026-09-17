@@ -196,7 +196,11 @@ class Vault:
             if record is None:
                 continue
             etype = EntityType.coerce(record.entity_type)
-            clear = self._engine.decrypt_surrogate(etype, hit.substitute)
+            # Phase 63 (REGISTRY-COLLISION-INTER-TYPE) : ``clear_index`` porte
+            # l'offset de sondage pour les types gazetteer (0 par défaut) ; le
+            # déchiffrement l'inverse. Pour CODE_POSTAL il porte l'indice chiffré
+            # historique (chemin géré dans decrypt_surrogate).
+            clear = self._engine.decrypt_surrogate(etype, hit.substitute, record.clear_index)
             if clear is None:
                 continue
             # D24: restituer la casse originale pour les types gazetteer.

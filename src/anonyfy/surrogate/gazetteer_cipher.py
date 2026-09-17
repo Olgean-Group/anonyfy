@@ -75,16 +75,26 @@ class GazetteerCipher:
             return None
         return self._names[self._perm.encrypt(idx)]
 
-    def decrypt(self, substitute: str) -> str | None:
+    def decrypt(self, substitute: str, offset: int = 0) -> str | None:
         """Retourne le nom clair, ou None si le substitut n'est pas du gazetteer.
 
         La permutation est bijective: ``encrypt`` et ``decrypt`` sont des
         inverses (pas besoin de table inverse matérialisée).
+
+        ``offset`` (phase 63, REGISTRY-COLLISION-INTER-TYPE) : décalage de
+        sondage retenu à l'enregistrement (``clear_index``). Le substitut
+        effectivement émis est celui de l'index ``(idx + offset) mod n``, donc
+        le clair s'obtient par ``decrypt((sub_idx - offset) mod n)``.
         """
         sub_idx = self._index_of(substitute.casefold())
         if sub_idx < 0:
             return None
-        return self._names[self._perm.decrypt(sub_idx)]
+        n = len(self._names)
+        # Ordre : décoder la permutation PUIS retrancher l'offset.
+        # ``probe(k)`` rend ``names[perm.encrypt((idx + k) % n)]`` ; donc
+        # ``perm.decrypt(sub_idx) == (idx + k) % n`` et le clair est à
+        # ``((idx + k) - k) % n == idx``.
+        return self._names[(self._perm.decrypt(sub_idx) - offset) % n]
 
     def probe(self, name: str, probe: int = 1) -> str | None:
         """Substitut du nom avec un décalage déterministe (D35i, filet D35f).
