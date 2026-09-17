@@ -90,7 +90,7 @@ ADDRESS_VERB_WINDOW: int = 1
 # œ/Œ. Sans elles, un token contenant une ligature était tronqué au « œ » et ne
 # matchait plus le gazetteer : 73 des 105 communes à ligature n'étaient jamais
 # masquées (fuite, invariant 1) et 9 étaient masquées partiellement.
-_LIGATURES = "\u0152\u0153\u00c6\u00e6"  # Œ œ Æ æ
+_LIGATURES = "\u0152\u0153\u00c6\u00e6\u0178\u00ff"  # Œ œ Æ æ Ÿ ÿ
 _TOKEN_RE = re.compile(rf"[A-Za-zÀ-ÿ{_LIGATURES}'’-]+")
 
 # Nombre maximum de tokens d'une phrase candidate (voies longues, communes

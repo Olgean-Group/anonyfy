@@ -192,7 +192,7 @@ _WINDOW = 40
 # ligatures explicites, « Œuilly » était tronqué en « uilly » et le token ne
 # matchait plus le gazetteer. Idem « æ »/« Æ » (dans `À-ÿ`, mais inclus par
 # cohérence avec places._TOKEN_RE).
-_LIGATURES = "\u0152\u0153\u00c6\u00e6"  # Œ œ Æ æ
+_LIGATURES = "\u0152\u0153\u00c6\u00e6\u0178\u00ff"  # Œ œ Æ æ Ÿ ÿ
 _TOKEN_RE = re.compile(rf"[A-ZÀ-Ý{_LIGATURES}][A-Za-zÀ-ÿ{_LIGATURES}'’-]*")
 
 #: Nombre maximum de tokens d'un patronyme composé (phase 35, D35e). Les

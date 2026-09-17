@@ -97,12 +97,18 @@ class TestDeterminisme:
 
 class TestIntrusionInvariant4:
     def test_intrusion_invariant4_siret_jamais_emis(self, tmp_path) -> None:
-        """Un SIRET valide jamais émis dans le scope n'est pas déchiffré en une
-        autre valeur claire (invariant 4)."""
+        """Un SIRET valide jamais émis dans le scope n'est pas déchiffré.
+
+        Assertion STRICTE (phase 65, ASSERTION-INTRUSION-FAIBLE) : l'ancienne
+        forme ``"..." not in result or result == "..."`` était tautologique
+        (elle passait même si l'invariant 4 était violé). On exige l'égalité
+        exacte : le texte est rendu inchangé.
+        """
         v = _vault(tmp_path)
         result = v.unmask("SIRET 41804261100008")
-        # Le SIRET n'a jamais été masqué: unmask le laisse tel quel (pas déchiffré)
-        assert "41804261100008" not in result or result == "SIRET 41804261100008"
+        assert result == "SIRET 41804261100008", (
+            f"invariant 4 violé: {result!r} (le SIRET n'a jamais été masqué)"
+        )
 
     def test_intrusion_nir_jamais_emis(self, tmp_path) -> None:
         v = _vault(tmp_path)

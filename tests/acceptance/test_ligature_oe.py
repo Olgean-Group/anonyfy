@@ -160,3 +160,24 @@ class TestTokenisationDirecte:
 
         matched = [m.group(0) for m in _TOKEN_RE.finditer("Œuilly")]
         assert matched == ["Œuilly"], f"triggers._TOKEN_RE a tronqué: {matched}"
+
+
+class TestYTremaMajuscule:
+    """Phase 63 : « Ÿ » (U+0178) est hors de `À-ÿ` (U+00C0-U+00FF), comme « œ ».
+
+    Même famille que OE-LIGATURE-DETECT : le token était tronqué au « Ÿ » et le
+    round-trip devenait faux (fragment du substitut laissé en place).
+    """
+
+    @pytest.mark.parametrize("texte", ["ALOŸS Dupont", "AŸDEN Dupont", "Jean ALOŸS"])
+    def test_round_trip_y_trema(self, vault, texte):
+        w = vault.mask(texte)
+        assert vault.unmask(w.text) == texte, (
+            f"round-trip cassé sur « Ÿ »: {texte!r} -> {w.text!r} -> {vault.unmask(w.text)!r}"
+        )
+
+    def test_tokenisation_couvre_y_trema(self):
+        from anonyfy.detect.context.places import _TOKEN_RE
+
+        matched = [m.group(0) for m in _TOKEN_RE.finditer("ALOŸS")]
+        assert matched == ["ALOŸS"], f"« Ÿ » tronqué: {matched}"

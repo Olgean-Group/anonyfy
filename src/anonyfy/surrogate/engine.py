@@ -492,12 +492,20 @@ class Engine:
             # Le retour de register_fpe est utilisé (idempotence: un même clair
             # renvoie le substitut déjà enregistré, ce qui reste le substitut
             # réel visible du unmask).
+            #
+            # Phase 63 (REGISTRY-COLLISION-INTER-TYPE) : ``probe_candidate``
+            # permet au registre de sonder un substitut libre quand celui du
+            # cipher est déjà attribué à un AUTRE clair (collision croisée
+            # PRENOM/PATRONYME : permutations indépendantes, used_surrogates
+            # global). L'offset retenu est mémorisé et inversé au unmask.
+            probe_candidate = self._make_probe_candidate(span.value, span.type)
             substitute = self._registry.register_fpe(
                 span.type.value,
                 span.value,
                 surrogate=substitute,
                 case_pattern=case_pattern,
                 format_pattern=fp_map.get(id(span)),
+                probe=probe_candidate,
             )
             substitutions.append((span.start, span.end, substitute, span.type))
 
@@ -625,6 +633,27 @@ class Engine:
             out.append((start, end, replacement, etype))
         return out
 
+    def _make_probe_candidate(self, span_value: str, etype: EntityType):
+        """Fonction de sondage ``probe(k)`` pour le registre (phase 63).
+
+        Renvoie une closure qui, pour un type gazetteer, propose le substitut
+        ``cipher.probe(value, k)`` (k >= 1), en sautant le point fixe (== clair).
+        Le registre retient l'offset ``k`` du premier candidat libre et
+        l'inverse au unmask. Pour un type sans cipher (FPE), renvoie ``None`` :
+        une collision y signalerait un vrai défaut de bijectivité.
+        """
+        cipher = self._cipher_for(etype)
+        if cipher is None:
+            return None
+
+        def probe(k: int) -> str | None:
+            candidate = cipher.probe(span_value, k)
+            if candidate is None or candidate.casefold() == span_value.casefold():
+                return None
+            return candidate
+
+        return probe
+
     def _probe_fixed_point_replacement(
         self, span_value: str, etype: EntityType, max_probes: int = 1000
     ) -> str | None:
@@ -632,11 +661,16 @@ class Engine:
 
         Pour un type gazetteer, ``cipher.probe(value, k)`` rend le nom à l'index
         ``perm.encrypt((idx + k) % n)`` (déterministe, bijectif par (idx, k) tant
-        que la colonne n'est pas saturée). Le registre reste le garde-fou:
-        ``register_fpe`` lève ``RegistryError`` si le candidat est déjà attribué
-        à un autre clair (collision -> sondage suivant). Pour un type sans probe
-        (FPE, CP, date, email, plaque, référence), renvoie ``None``: le clair est
-        déjà enregistré par une version cassée, aucune correction possible.
+        que la colonne n'est pas saturée).
+
+        Phase 63 (REGISTRY-COLLISION-INTER-TYPE) : l'offset ``k`` retenu est
+        persisté dans ``clear_index`` pour que le unmask inverse le sondage
+        (``decrypt(index - k)``). Sans cet offset, le point fixe sondé n'était
+        pas réversible (round-trip faux, ex. « Rue du Doubs »).
+
+        Pour un type sans probe (FPE, CP, date, email, plaque, référence),
+        renvoie ``None``: le clair est déjà enregistré par une version cassée,
+        aucune correction possible.
         """
         cipher = self._cipher_for(etype)
         for k in range(1, max_probes + 1):
@@ -651,6 +685,7 @@ class Engine:
                     span_value,
                     surrogate=candidate,
                     case_pattern=(classify_case(span_value) if etype in _GAZETTEER_TYPES else None),
+                    clear_index=k,
                 )
             except RegistryError:
                 continue
@@ -866,8 +901,16 @@ class Engine:
                 return dept
         return depts[start]
 
-    def decrypt_surrogate(self, etype: EntityType, surrogate: str) -> str | None:
-        """Déchiffre un substitut selon son type (pour Vault.unmask)."""
+    def decrypt_surrogate(
+        self, etype: EntityType, surrogate: str, clear_index: int = 0
+    ) -> str | None:
+        """Déchiffre un substitut selon son type (pour Vault.unmask).
+
+        ``clear_index`` (phase 63) : pour les types gazetteer, porte l'offset de
+        sondage retenu à l'enregistrement (collision inter-type ou point fixe) et
+        est retranché avant la permutation inverse. Pour CODE_POSTAL, il porte
+        l'indice chiffré historique (chemin dédié ci-dessous).
+        """
         # NIR Corse 2A/2B (OBJ-REC-102): le substitut 16-digit (cle 3) a été
         # chiffré via encrypt_cb; on dispatch par longueur. Le substitut 15-digit
         # (cle 2, 2A ou non) -> decrypt_nir. La restitution du 2A est faite par le
@@ -882,19 +925,19 @@ class Engine:
         if etype == EntityType.PATRONYME:
             if self._cipher_patronyme is None:
                 self._cipher_patronyme = self._build_cipher("patronyme", load_noms)
-            return self._cipher_patronyme.decrypt(surrogate)
+            return self._cipher_patronyme.decrypt(surrogate, clear_index)
         if etype == EntityType.PRENOM:
             if self._cipher_prenom is None:
                 self._cipher_prenom = self._build_cipher("prenom", load_prenoms)
-            return self._cipher_prenom.decrypt(surrogate)
+            return self._cipher_prenom.decrypt(surrogate, clear_index)
         if etype == EntityType.COMMUNE:
             if self._cipher_commune is None:
                 self._cipher_commune = self._build_cipher("commune", load_communes)
-            return self._cipher_commune.decrypt(surrogate)
+            return self._cipher_commune.decrypt(surrogate, clear_index)
         if etype == EntityType.VOIE:
             if self._cipher_voie is None:
                 self._cipher_voie = self._build_cipher("voie", load_voies)
-            return self._cipher_voie.decrypt(surrogate)
+            return self._cipher_voie.decrypt(surrogate, clear_index)
         if etype == EntityType.PLAQUE_SIV:
             return self._cipher_plate.decrypt(surrogate)
         if etype == EntityType.REFERENCE_DOSSIER:

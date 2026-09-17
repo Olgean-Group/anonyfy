@@ -49,7 +49,7 @@ import hmac
 import os
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +69,12 @@ CURRENT_SCHEMA_VERSION = 4
 # est atomique (tout ou rien); un crash perd au plus le batch en cours (les
 # réservations étant idempotentes, re-réserver reconstruit le même état).
 _BATCH_SIZE = 1024
+
+# Nombre maximum de candidats sondés pour résoudre une collision inter-type
+# (phase 63, REGISTRY-COLLISION-INTER-TYPE). Borne haute du sondage : au-delà,
+# l'espace de substituts du type est considéré saturé et la réservation échoue
+# explicitement (jamais de substitut silencieusement dupliqué).
+_MAX_PROBES = 1000
 
 
 class RegistryError(Exception):
@@ -374,6 +380,7 @@ class ScopeRegistry:
         case_pattern: str | None = None,
         format_pattern: str | None = None,
         clear_index: int = 0,
+        probe: Callable[[int], str | None] | None = None,
     ) -> str:
         """Enregistre un substitut FPE pré-calculé (grands domaines, phase 07/08).
 
@@ -401,10 +408,19 @@ class ScopeRegistry:
         (Permutation) du clair, JAMAIS le clair lui-même (invariant 1). Défaut 0
         pour les types FPE classiques (rétrocompatible).
 
+        ``probe`` (phase 63, REGISTRY-COLLISION-INTER-TYPE): fonction optionnelle
+        ``probe(k) -> substitut candidat`` (``k >= 1``), fournie par le cipher du
+        type. Quand le substitut demandé est déjà attribué à un AUTRE clair
+        (collision inter-type : les permutations PRENOM et PATRONYME sont
+        indépendantes alors que ``used_surrogates`` est global), le registre
+        sonde les candidats successifs (k = 1, 2, ... borné) jusqu'à en trouver
+        un libre. L'offset ``k`` retenu est mémorisé dans ``clear_index`` pour
+        que le unmask puisse inverser le sondage (``decrypt(index - k)``). Sans
+        ``probe`` (types FPE), la collision reste une ``RegistryError`` : elle
+        signalerait un vrai défaut de bijectivité.
+
         Idempotent: un même (entity_type, clear_value) renvoie le substitut déjà
-        enregistré. Lève ``RegistryError`` si le substitut est déjà attribué à un
-        autre clair (collision inter-type, ne devrait pas arriver car FPE est
-        bijectif par type et les types ont des formats distincts).
+        enregistré.
         """
         if not entity_type:
             raise ValueError("entity_type ne peut pas être vide")
@@ -419,16 +435,35 @@ class ScopeRegistry:
             existing = self._hmac_to_surrogate.get((entity_type, clear_hmac))
             if existing is not None:
                 return existing
-            if surrogate in self._used_surrogates:
-                raise RegistryError(
-                    f"substitut FPE en collision avec un clair distinct: {surrogate!r}"
-                )
-            self._insert(
-                entity_type, surrogate, clear_index, clear_hmac, case_pattern, format_pattern
-            )
-            self._hmac_to_surrogate[(entity_type, clear_hmac)] = surrogate
-            self._used_surrogates.add(surrogate)
-            return surrogate
+            offset = 0
+            candidate = surrogate
+            if candidate in self._used_surrogates:
+                if probe is None:
+                    raise RegistryError(
+                        f"substitut FPE en collision avec un clair distinct: {surrogate!r}"
+                    )
+                found = False
+                for k in range(1, _MAX_PROBES + 1):
+                    next_candidate = probe(k)
+                    if next_candidate is None:
+                        break
+                    if next_candidate not in self._used_surrogates:
+                        candidate = next_candidate
+                        offset = k
+                        found = True
+                        break
+                if not found:
+                    raise RegistryError(
+                        f"sondage de collision épuisé après {_MAX_PROBES} essais "
+                        f"(substitut {surrogate!r} déjà attribué)"
+                    )
+            elif clear_index:
+                # Le cipher a déjà sondé (point fixe D35i) : conserver son offset.
+                offset = clear_index
+            self._insert(entity_type, candidate, offset, clear_hmac, case_pattern, format_pattern)
+            self._hmac_to_surrogate[(entity_type, clear_hmac)] = candidate
+            self._used_surrogates.add(candidate)
+            return candidate
 
     def _insert(
         self,
