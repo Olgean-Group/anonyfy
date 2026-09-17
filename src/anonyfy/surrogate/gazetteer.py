@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import warnings
 from dataclasses import dataclass
 
 from anonyfy.detect.gazetteers.loader import Gazetteer
@@ -47,6 +48,11 @@ class PickResult:
     name: str
     gender: str = ""
     departement: str = ""
+    #: True si un attribut demandé n'a pas pu être préservé (repli sur le
+    #: gazetteer complet). Signale au appelant un écart d'attribut, sans jamais
+    #: exposer le clair (invariant 1, phase 65 LOGGING-REPLI-GENRE).
+    gender_fallback: bool = False
+    departement_fallback: bool = False
 
 
 def pick(
@@ -113,9 +119,25 @@ def pick(
         filtered = [e for e in filtered if e.departement == departement]
 
     # Repli sur le gazetteer complet si le filtre élimine tout (genre inconnu,
-    # département absent). PLAN ligne 561: repli sur genre neutre.
+    # département absent). PLAN ligne 561: repli sur genre neutre + avertissement
+    # journalisé (phase 65, LOGGING-REPLI-GENRE). L'avertissement ne contient
+    # jamais la valeur claire (invariant 1) : il nomme le type et l'attribut.
+    gender_fallback = False
+    departement_fallback = False
     if not filtered:
         filtered = list(gazetteer)
+        gender_fallback = gender is not None
+        departement_fallback = departement is not None
+        attributs = []
+        if gender_fallback:
+            attributs.append(f"genre={gender!r}")
+        if departement_fallback:
+            attributs.append(f"departement={departement!r}")
+        warnings.warn(
+            f"Repli sur le gazetteer complet pour le type {entity_type!r}: "
+            f"aucune entrée pour {' et '.join(attributs)}; attribut non préservé",
+            stacklevel=2,
+        )
 
     n = len(filtered)
     index = _hmac_index(key, scope, entity_type, clear_value, n)
@@ -124,6 +146,8 @@ def pick(
         name=entry.name,
         gender=entry.genre,
         departement=entry.departement,
+        gender_fallback=gender_fallback,
+        departement_fallback=departement_fallback,
     )
 
 
