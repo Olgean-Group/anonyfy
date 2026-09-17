@@ -1,3 +1,51 @@
+## 0.1.11 (2026-09-16)
+
+Correctif de sûreté : une collision de substituts entre PRENOM et PATRONYME
+faisait échouer `mask`. Également : point fixe sondé désormais réversible,
+validation calendaire du NIR, repli genre averti, assertion d'invariant durcie.
+L'API publique est inchangée ; un avertissement est ajouté sur un cas de repli.
+
+### Collision de substituts inter-type (phase 63)
+
+- **Avant** : les permutations PRENOM et PATRONYME sont indépendantes, mais les
+  substituts attribués sont suivis globalement. Un nom commun aux deux
+  gazetteers pouvait produire le même substitut dans les deux types
+  (ex. `PRE('AARRON') == NOM('AUCHATRAIRE') == 'GALINA'`) : la seconde
+  réservation levait `RegistryError` et **`mask` échouait**. Mesure : **8 249
+  collisions sur 23 227 prénoms purs (~35 %)**.
+- **Après** : le registre sonde un substitut libre (offset mémorisé dans
+  `clear_index`, colonne existante — aucun changement de format de registre).
+  Mesure : **0 erreur et 0 round-trip faux sur 2 000 prénoms purs**.
+- **Point fixe réversible** : quand un substitut égalait le clair
+  (ex. `Rue du Doubs` en VOIE), le sondage D35i corrigeait le masquage mais le
+  round-trip était faux. L'offset est désormais persisté et inversé au unmask.
+- **Ligatures et `Ÿ`** : `Ÿ`/`ÿ` (U+0178), hors de la plage `À-ÿ` comme `œ`,
+  tronquaient les tokens et cassaient le round-trip ; les classes de tokens des
+  deux détecteurs les couvrent désormais.
+
+### Validation calendaire du NIR (phase 64)
+
+- **Avant** : tout mois `\d{2}` était accepté, y compris 13-19, 21-29 et 32-99
+  (faux positifs).
+- **Après** : `validate` exige un mois NIR valide (01-12, 20 pour les personnes
+  nées en France, 30-31 pour les naissances à l'étranger). Nouvelle fonction
+  `format_valid` pour la plausibilité des substituts FPE (dont le mois est
+  chiffré) : la propriété « substitut de même type » est préservée.
+
+### Dettes de la revue S8
+
+- **Repli genre averti** (phase 65) : `pick` émet un `UserWarning` nommant le
+  type et l'attribut non préservé (jamais la valeur claire) et expose
+  `gender_fallback`/`departement_fallback` sur son résultat.
+- **Assertion d'invariant durcie** (phase 65) : le test d'intrusion sur un
+  SIRET jamais émis utilise une égalité stricte au lieu d'une disjonction
+  tautologique.
+
+### Documentation
+
+- ADR 0003 §14 : sondage de collision inter-type et offset réversible
+  (déterminisme, injectivité, réversibilité).
+
 ## 0.1.10 (2026-09-15)
 
 Correctif de performance : `Vault.mask` détectait les identifiants deux fois sur
