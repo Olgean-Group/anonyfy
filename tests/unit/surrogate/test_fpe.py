@@ -120,8 +120,14 @@ def test_substitut_siret_reference_plan_valide():
 
 
 def test_substitut_nir_valide():
+    """Le substitut FPE a la FORME d'un NIR (format + clé mod 97).
+
+    Phase 64 : ``validate`` contrôle désormais le mois calendaire NIR, ce qui
+    ne s'applique pas à un substitut (mois chiffré, aléatoire). La plausibilité
+    du substitut (F3-type) est portée par ``format_valid``.
+    """
     c = fpe.encrypt_nir(NIR, key=ZERO_KEY, scope=SCOPE)
-    assert nir_v.validate(c)
+    assert nir_v.format_valid(c)
 
 
 def test_substitut_iban_valide():

@@ -198,3 +198,52 @@ de vecteurs NIST).
 - La rotation de clé (ADR 0001 §13) reste hors périmètre v1: la
   permutation keyée dépend de la clé, et toute rotation exigerait de
   rejouer les indices, impossible sans le clair (interdit par invariant 1).
+---
+
+## 14. Amendement phase 63 — sondage de collision inter-type et offset réversible
+
+**Contexte.** Deux défauts de réversibilité/disponibilité ont été trouvés et
+corrigés (backlog `REGISTRY-COLLISION-INTER-TYPE`, D23/D26) :
+
+1. Les permutations PRENOM et PATRONYME sont **indépendantes**, mais
+   `used_surrogates` est **global au registre**. Un nom commun aux deux
+   gazetteers pouvait produire le même substitut dans les deux types
+   (ex. `PRE('AARRON') == NOM('AUCHATRAIRE') == 'GALINA'`). La seconde
+   réservation levait `RegistryError` et **faisait échouer `mask`**.
+   Mesure avant correctif : 8 249 collisions sur 23 227 prénoms purs (~35 %).
+2. Quand un substitut égalait le clair (point fixe, ex. `'Rue du Doubs'` pour
+   le type VOIE), le filet D35i enregistrait un substitut sondé **sans
+   mémoriser le décalage** : au `unmask`, la permutation inverse rendait un
+   autre nom. Le round-trip était faux.
+
+**Décision.** Le sondage devient une propriété du registre, seul détenteur
+des substituts attribués :
+
+- `register_fpe(..., probe=fn)` : quand le substitut demandé est déjà attribué
+  à un **autre** clair, le registre sonde `probe(k)` (k = 1..1000) jusqu'à un
+  candidat libre. Sans `probe` (types FPE), la collision reste une
+  `RegistryError` : elle signalerait un vrai défaut de bijectivité.
+- L'offset `k` retenu est **persisté dans `clear_index`** (colonne existante,
+  jusqu'ici 0 pour les types gazetteer) : aucun bump de `schema_version`
+  n'est nécessaire, les registres antérieurs (offset 0) restent valides.
+- `GazetteerCipher.decrypt(substitute, offset)` inverse le sondage :
+  `names[(perm.decrypt(sub_idx) - offset) mod n]`. L'offset transite par
+  `Vault.unmask` (`record.clear_index`), jamais le clair (invariant 1).
+
+**Conséquences.**
+
+- Invariant 2 (déterminisme scopé) : le sondage est déterministe et persistant ;
+  deux registres neufs produisent la même séquence de substituts.
+- Invariant 3 (injectivité) : les substituts restent uniques globalement.
+- Invariant 4 : inchangé (`contains`/`lookup` inchangés).
+- `mask` ne lève plus sur collision inter-type (disponibilité restaurée) ;
+  le point fixe sondé est désormais réversible.
+- Deux défauts annexes de la même famille ont été corrigés : `Ÿ`/`ÿ` (U+0178),
+  hors de `À-ÿ` comme `œ` l'était, tronquait les tokens et cassait le
+  round-trip ; la classe de tokens des deux détecteurs les couvre désormais.
+
+**Références.** `src/anonyfy/surrogate/registry.py` (`register_fpe`),
+`src/anonyfy/surrogate/gazetteer_cipher.py` (`decrypt`, `probe`),
+`src/anonyfy/surrogate/engine.py` (`_make_probe_candidate`),
+`src/anonyfy/vault.py` (transmission de `clear_index`),
+`tests/unit/test_rev_collision_inter_type.py`.
